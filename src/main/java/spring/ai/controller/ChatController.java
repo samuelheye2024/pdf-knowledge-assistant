@@ -39,7 +39,7 @@ public class ChatController {
     private static final int SIMILARITY_TOP_K = 5;
 
     private static final String RAG_PROMPT = """
-            Your task is to answer the questions about Indian Constitution. Use the information from the DOCUMENTS
+            Your task is to answer the questions using the documents as context. Use the information from the DOCUMENTS
             section to provide accurate answers. If unsure or if the answer isn't found in the DOCUMENTS section,
             simply state that you don't know the answer.
 
