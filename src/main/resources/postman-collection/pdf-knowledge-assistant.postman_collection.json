@@ -1,0 +1,102 @@
+{
+  "info": {
+    "name": "PDF Knowledge Assistant",
+    "description": "Endpoints for pdf-knowledge-assistant: chat, RAG chat, and document upload.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_postman_id": "b1e6a1e0-2f2a-4a7a-9b1d-0f1c6f6c9a10"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Chat",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/chat",
+          "host": ["{{baseUrl}}"],
+          "path": ["chat"]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"q\": \"What is the Preamble of the Indian Constitution?\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "description": "Plain chat with the LLM, no retrieval augmentation."
+      },
+      "response": []
+    },
+    {
+      "name": "Chat with RAG",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/chat/rag",
+          "host": ["{{baseUrl}}"],
+          "path": ["chat", "rag"]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"q\": \"What are the fundamental rights guaranteed by the Indian Constitution?\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "description": "Chat augmented with similarity search results from the vector store. Response is JSON: {\"answer\": \"...\", \"sources\": [{\"file\": \"...\", \"page\": 1}, ...]}."
+      },
+      "response": []
+    },
+    {
+      "name": "Upload Documents",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/documents",
+          "host": ["{{baseUrl}}"],
+          "path": ["documents"]
+        },
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "files",
+              "type": "file",
+              "src": []
+            },
+            {
+              "key": "files",
+              "type": "file",
+              "src": []
+            }
+          ]
+        },
+        "description": "Upload one or more PDF files (multipart field name 'files', repeatable). Chunks are embedded and added to the in-memory vector store."
+      },
+      "response": []
+    }
+  ]
+}

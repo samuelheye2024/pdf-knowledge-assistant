@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>PDF Knowledge Assistant</title>
+<link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div class="app">
+
+    <aside class="sidebar">
+      <button id="newChatBtn" class="new-chat-btn">
+        <span class="plus">+</span> New Chat
+      </button>
+
+      <div class="section">
+        <div class="section-label">Mode</div>
+        <div class="mode-toggle" id="modeToggle">
+          <button class="mode-option active" data-mode="chat" type="button">Standard Chat</button>
+          <button class="mode-option" data-mode="rag" type="button">PDF Knowledge Assistant</button>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-label">Documents</div>
+
+        <label for="fileInput" class="upload-btn">
+          Upload PDFs
+        </label>
+        <input type="file" id="fileInput" accept="application/pdf,.pdf" multiple hidden />
+
+        <div class="upload-progress-wrap hidden" id="uploadProgressWrap">
+          <div class="upload-progress-bar" id="uploadProgressBar"></div>
+        </div>
+        <div class="upload-status" id="uploadStatus"></div>
+
+        <ul class="file-list" id="fileList"></ul>
+      </div>
+
+      <div class="sidebar-footer">
+        API: <code id="apiBaseLabel"></code>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="main-header">
+        <h1 id="modeTitle">Standard Chat</h1>
+        <p id="modeDesc">Chatting directly with the model — no document context.</p>
+      </header>
+
+      <div class="messages" id="messages">
+        <div class="empty-state" id="emptyState">
+          <h2 id="emptyStateTitle">Standard Chat</h2>
+          <p id="emptyStateText">Ask a question below to get started. Switch to <strong>PDF Knowledge Assistant</strong> mode to ask questions grounded in your uploaded documents.</p>
+        </div>
+      </div>
+
+      <form class="composer" id="composerForm">
+        <textarea
+          id="messageInput"
+          placeholder="Message the assistant..."
+          rows="1"
+        ></textarea>
+        <button type="submit" id="sendBtn" class="send-btn" disabled>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M4 12L20 4L14 20L11 13L4 12Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+          </svg>
+        </button>
+      </form>
+    </main>
+
+  </div>
+
+  <script src="js/app.js"></script>
+</body>
+</html>
