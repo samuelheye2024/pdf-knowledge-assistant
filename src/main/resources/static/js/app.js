@@ -1,10 +1,15 @@
 (() => {
   "use strict";
 
-  // Backend base URL. Using an absolute URL means this UI works whether it's
-  // served by the Spring Boot app itself (http://localhost:8080/) or opened
-  // as a standalone static file/folder elsewhere.
-  const API_BASE = "http://localhost:8080";
+  // Backend base URL. The API is served by this same Spring Boot app, so we
+  // default to whatever origin the page itself was loaded from — this makes
+  // the UI work unmodified whether it's opened via http://localhost:8080,
+  // a LAN IP, or a public tunnel (Cloudflare, ngrok, etc.) pointed at the app.
+  // The one case window.location.origin can't help with is opening this
+  // file directly from disk (file://), so that falls back to localhost:8080.
+  const API_BASE = window.location.protocol === "file:"
+    ? "http://localhost:8080"
+    : window.location.origin;
 
   const MODES = {
     chat: {
