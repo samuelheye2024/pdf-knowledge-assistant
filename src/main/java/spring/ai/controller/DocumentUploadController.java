@@ -10,21 +10,20 @@ import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import spring.ai.dto.IngestDirectoryRequest;
 import spring.ai.model.DocumentMetadataKeys;
 
-import java.awt.EventQueue;
-import java.awt.FileDialog;
-import java.awt.Frame;
-import java.awt.Taskbar;
 import java.io.IOException;
-import java.lang.reflect.InvocationTargetException;
+import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -33,17 +32,14 @@ import java.util.stream.Stream;
 /**
  * Ingests PDFs into the shared {@link VectorStore} by reading them directly
  * off disk, given a directory to scan ({@code POST /documents/ingest-directory}).
- * {@code POST /documents/browse-dialog} pops a native OS "choose a folder"
- * dialog on the machine running this app and returns the chosen absolute
- * path, so the UI never needs the user to type one.
+ * {@code GET /documents/browse} lists a directory's subfolders (plain
+ * {@code java.nio.file}, no native UI toolkit involved) so the frontend can
+ * render an in-app, click-through folder browser — no OS dialog, no AWT/Swing,
+ * no window-manager focus quirks to fight, and no headless-mode footgun.
  *
  * <p>Files are read in place — never copied or moved — so each chunk's
  * metadata can carry the file's real absolute path, which {@code /chat/rag}
  * then surfaces back in its citations.
- *
- * <p>The native dialog only makes sense when this app runs directly on a
- * user's own desktop (as intended here) — it requires a display and will
- * fail if run headless (e.g. in a container or over SSH with no GUI).
  */
 @RestController
 public class DocumentUploadController {
@@ -57,80 +53,106 @@ public class DocumentUploadController {
     }
 
     /**
-     * Opens a native OS folder-picker dialog on the machine running this
-     * app and returns the chosen directory's absolute path (or
-     * {@code {"cancelled": true}} if the user dismissed it without
-     * choosing one). The frontend calls this, then passes the result
-     * straight to {@code /documents/ingest-directory}.
+     * Lists a directory's subfolders for the in-app folder browser.
+     *
+     * <ul>
+     *     <li>No params — lists the user's home directory.</li>
+     *     <li>{@code ?path=/abs/path} — lists that directory.</li>
+     *     <li>{@code ?roots=true} — lists filesystem roots (drive letters on
+     *     Windows, {@code /} on macOS/Linux) instead of a single directory;
+     *     {@code path} is ignored when this is set.</li>
+     * </ul>
+     *
+     * <p>Hidden and unreadable entries are filtered out. Each entry includes
+     * a non-recursive count of PDFs directly inside it, as a hint for which
+     * folder to pick.
      */
-    @PostMapping("/documents/browse-dialog")
-    public ResponseEntity<Map<String, Object>> browseForDirectory() {
-        String[] chosen = new String[1];
-        String[] error = new String[1];
+    @GetMapping("/documents/browse")
+    public ResponseEntity<Map<String, Object>> browseDirectory(
+            @RequestParam(required = false) String path,
+            @RequestParam(required = false, defaultValue = "false") boolean roots) {
 
-        Runnable showDialog = () -> {
-            Frame owner = new Frame();
-            try {
-                // A plain terminal-launched JVM has no Dock activation of its
-                // own, so the dialog can open *behind* the browser/terminal
-                // with no visible cue. Force it to the front and bounce the
-                // Dock icon so it's actually noticeable.
-                owner.setAlwaysOnTop(true);
-
-                if (Taskbar.isTaskbarSupported()) {
-                    Taskbar taskbar = Taskbar.getTaskbar();
-                    if (taskbar.isSupported(Taskbar.Feature.USER_ATTENTION)) {
-                        taskbar.requestUserAttention(true, true);
-                    }
-                }
-
-                FileDialog dialog = new FileDialog(owner, "Select a folder to ingest", FileDialog.LOAD);
-                dialog.setMultipleMode(false);
-                dialog.setAlwaysOnTop(true);
-                dialog.toFront();
-                dialog.setVisible(true);
-
-                String dir = dialog.getDirectory();
-                String file = dialog.getFile();
-                if (dir != null && file != null) {
-                    chosen[0] = Path.of(dir, file).toString();
-                }
-            } catch (Exception e) {
-                error[0] = e.getMessage();
-            } finally {
-                owner.dispose();
+        if (roots) {
+            List<Map<String, Object>> rootEntries = new ArrayList<>();
+            for (Path root : FileSystems.getDefault().getRootDirectories()) {
+                rootEntries.add(directoryEntry(root));
             }
-        };
 
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("path", null);
+            body.put("parent", null);
+            body.put("entries", rootEntries);
+            return ResponseEntity.ok(body);
+        }
+
+        Path directory = (path == null || path.isBlank())
+                ? Path.of(System.getProperty("user.home"))
+                : Path.of(path);
+
+        directory = directory.toAbsolutePath().normalize();
+
+        if (!Files.isDirectory(directory)) {
+            return badRequest("Not a directory: " + directory);
+        }
+        if (!Files.isReadable(directory)) {
+            return badRequest("Not readable: " + directory);
+        }
+
+        List<Map<String, Object>> entries;
         try {
-            if (EventQueue.isDispatchThread()) {
-                showDialog.run();
-            } else {
-                EventQueue.invokeAndWait(showDialog);
-            }
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
+            entries = listSubdirectories(directory);
+        } catch (IOException e) {
             return ResponseEntity
                     .status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Map.of("error", "Interrupted while waiting for folder dialog"));
-        } catch (InvocationTargetException e) {
-            return ResponseEntity
-                    .status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Map.of("error", "Failed to open folder dialog: " + e.getCause()));
+                    .body(Map.of("error", "Failed to list " + directory + ": " + e.getMessage()));
         }
 
-        if (error[0] != null) {
-            return ResponseEntity
-                    .status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Map.of("error", "Failed to open folder dialog: " + error[0]
-                            + " (this endpoint requires a display; it won't work headless)"));
-        }
+        Path parent = directory.getParent();
 
-        if (chosen[0] == null) {
-            return ResponseEntity.ok(Map.of("cancelled", true));
-        }
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("path", directory.toString());
+        body.put("parent", parent != null ? parent.toString() : null);
+        body.put("entries", entries);
+        return ResponseEntity.ok(body);
+    }
 
-        return ResponseEntity.ok(Map.of("directory", chosen[0]));
+    private List<Map<String, Object>> listSubdirectories(Path directory) throws IOException {
+        try (Stream<Path> stream = Files.list(directory)) {
+            return stream
+                    .filter(this::isBrowsableDirectory)
+                    .sorted(Comparator.comparing(p -> p.getFileName().toString().toLowerCase()))
+                    .map(this::directoryEntry)
+                    .toList();
+        }
+    }
+
+    private boolean isBrowsableDirectory(Path path) {
+        try {
+            return Files.isDirectory(path) && Files.isReadable(path) && !Files.isHidden(path);
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    private Map<String, Object> directoryEntry(Path dir) {
+        String name = dir.getFileName() != null ? dir.getFileName().toString() : dir.toString();
+
+        Map<String, Object> entry = new LinkedHashMap<>();
+        entry.put("name", name);
+        entry.put("path", dir.toAbsolutePath().normalize().toString());
+        entry.put("pdfCount", countPdfsDirectlyIn(dir));
+        return entry;
+    }
+
+    private int countPdfsDirectlyIn(Path dir) {
+        try (Stream<Path> stream = Files.list(dir)) {
+            return (int) stream
+                    .filter(Files::isRegularFile)
+                    .filter(p -> p.getFileName().toString().toLowerCase().endsWith(PDF_EXTENSION))
+                    .count();
+        } catch (IOException e) {
+            return 0;
+        }
     }
 
     /**

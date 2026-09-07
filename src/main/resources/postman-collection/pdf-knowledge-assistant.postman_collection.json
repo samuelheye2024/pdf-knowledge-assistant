@@ -10,6 +10,11 @@
       "key": "baseUrl",
       "value": "http://localhost:8080",
       "type": "string"
+    },
+    {
+      "key": "browsePath",
+      "value": "",
+      "type": "string"
     }
   ],
   "item": [
@@ -79,25 +84,34 @@
       "response": []
     },
     {
-      "name": "Browse Folder Dialog",
+      "name": "Browse Directory",
       "request": {
-        "method": "POST",
+        "method": "GET",
         "header": [],
         "url": {
-          "raw": "{{baseUrl}}/documents/browse-dialog",
+          "raw": "{{baseUrl}}/documents/browse?path={{browsePath}}",
           "host": [
             "{{baseUrl}}"
           ],
           "path": [
             "documents",
-            "browse-dialog"
+            "browse"
+          ],
+          "query": [
+            {
+              "key": "path",
+              "value": "{{browsePath}}",
+              "description": "Absolute directory to list. Omit (or leave blank) to list the home directory."
+            },
+            {
+              "key": "roots",
+              "value": "true",
+              "description": "List filesystem roots instead (drive letters on Windows, / on macOS/Linux). Disable this query param to use 'path' instead.",
+              "disabled": true
+            }
           ]
         },
-        "body": {
-          "mode": "raw",
-          "raw": ""
-        },
-        "description": "Pops a native OS folder-picker dialog on the machine running the app and returns the chosen absolute path as {\"directory\": \"...\"}, or {\"cancelled\": true} if dismissed without a selection. Only works when the app is running with a display attached (not headless/containerized) \u2014 calling this from Postman will pop the dialog on whatever machine is running the Spring Boot app, which is a bit unusual outside the app's own UI, but useful for verifying the endpoint directly."
+        "description": "Lists a directory's subfolders using plain java.nio.file calls \u2014 no OS dialog, no AWT. Omit 'path' to list the home directory, or enable the 'roots' query param to list filesystem roots (drive letters on Windows, / on macOS/Linux) instead. Each entry includes 'pdfCount', a non-recursive count of PDFs directly inside it. The UI's 'Browse Folder\u2026' button drives this endpoint to render an in-app folder browser; 'Ingest Directory' below then does the actual ingestion once you've picked a folder."
       },
       "response": []
     },
@@ -130,7 +144,7 @@
             }
           }
         },
-        "description": "Scans 'directory' on disk for PDFs and adds them to the vector store, reading each file in place (nothing is copied or uploaded). 'recursive' defaults to true when omitted. Each chunk's metadata records the file's real absolute path, which /chat/rag returns in its 'sources'. The UI normally gets 'directory' from 'Browse Folder Dialog' below rather than the user typing it, but this endpoint works standalone too."
+        "description": "Scans 'directory' on disk for PDFs and adds them to the vector store, reading each file in place (nothing is copied or uploaded). 'recursive' defaults to true when omitted. Each chunk's metadata records the file's real absolute path, which /chat/rag returns in its 'sources'. The UI normally gets 'directory' from the in-app folder browser ('Browse Directory' above) rather than the user typing it, but this endpoint works standalone too."
       },
       "response": []
     }

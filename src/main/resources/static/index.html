@@ -71,6 +71,33 @@
 
   </div>
 
+  <div class="modal-overlay hidden" id="folderBrowserOverlay">
+    <div class="modal" id="folderBrowserModal">
+      <div class="modal-header">
+        <h2>Select a Folder</h2>
+        <button type="button" class="modal-close" id="folderBrowserCloseBtn" aria-label="Close">&times;</button>
+      </div>
+
+      <div class="modal-nav">
+        <button type="button" class="modal-nav-btn" id="folderBrowserHomeBtn">Home</button>
+        <button type="button" class="modal-nav-btn" id="folderBrowserComputerBtn">Computer</button>
+        <button type="button" class="modal-nav-btn" id="folderBrowserUpBtn">&uarr; Up</button>
+      </div>
+
+      <div class="modal-path" id="folderBrowserPath"></div>
+
+      <ul class="modal-folder-list" id="folderBrowserList"></ul>
+
+      <div class="modal-footer">
+        <div class="modal-footer-status" id="folderBrowserStatus"></div>
+        <div class="modal-footer-actions">
+          <button type="button" class="btn-secondary" id="folderBrowserCancelBtn">Cancel</button>
+          <button type="button" class="btn-primary" id="folderBrowserIngestBtn">Ingest This Folder</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script src="js/app.js"></script>
 </body>
 </html>

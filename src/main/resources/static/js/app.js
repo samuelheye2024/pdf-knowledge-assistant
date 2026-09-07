@@ -56,6 +56,17 @@
   const ingestStatus = document.getElementById("ingestStatus");
   const fileList = document.getElementById("fileList");
 
+  const folderBrowserOverlay = document.getElementById("folderBrowserOverlay");
+  const folderBrowserCloseBtn = document.getElementById("folderBrowserCloseBtn");
+  const folderBrowserHomeBtn = document.getElementById("folderBrowserHomeBtn");
+  const folderBrowserComputerBtn = document.getElementById("folderBrowserComputerBtn");
+  const folderBrowserUpBtn = document.getElementById("folderBrowserUpBtn");
+  const folderBrowserPath = document.getElementById("folderBrowserPath");
+  const folderBrowserList = document.getElementById("folderBrowserList");
+  const folderBrowserStatus = document.getElementById("folderBrowserStatus");
+  const folderBrowserCancelBtn = document.getElementById("folderBrowserCancelBtn");
+  const folderBrowserIngestBtn = document.getElementById("folderBrowserIngestBtn");
+
   apiBaseLabel.textContent = API_BASE.replace(/^https?:\/\//, "");
 
   // ---------- Textarea auto-resize + send button state ----------
@@ -322,13 +333,70 @@
     item.icon.textContent = status === "success" ? "✓" : status === "error" ? "✕" : "⏳";
   }
 
-  browseFolderBtn.addEventListener("click", async () => {
-    browseFolderBtn.disabled = true;
-    ingestStatus.textContent = "Waiting for folder selection...";
-    ingestStatus.classList.remove("error");
+  browseFolderBtn.addEventListener("click", () => {
+    openFolderBrowser();
+  });
+
+  // ---------- In-app folder browser modal (backed by GET /documents/browse,
+  // plain java.nio.file directory listing server-side — no OS dialog, no
+  // AWT/Swing, nothing that depends on window-manager focus behavior) ----------
+
+  let currentBrowsePath = null;   // absolute path currently listed, or null while viewing "Computer" (roots)
+  let currentBrowseParent = null; // absolute path "Up" should go to, or null if there isn't one
+
+  function openFolderBrowser() {
+    folderBrowserOverlay.classList.remove("hidden");
+    loadFolderListing({});
+  }
+
+  function closeFolderBrowser() {
+    folderBrowserOverlay.classList.add("hidden");
+  }
+
+  folderBrowserCloseBtn.addEventListener("click", closeFolderBrowser);
+  folderBrowserCancelBtn.addEventListener("click", closeFolderBrowser);
+
+  folderBrowserOverlay.addEventListener("click", (e) => {
+    if (e.target === folderBrowserOverlay) closeFolderBrowser();
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !folderBrowserOverlay.classList.contains("hidden")) {
+      closeFolderBrowser();
+    }
+  });
+
+  folderBrowserHomeBtn.addEventListener("click", () => loadFolderListing({}));
+  folderBrowserComputerBtn.addEventListener("click", () => loadFolderListing({ roots: true }));
+  folderBrowserUpBtn.addEventListener("click", () => {
+    if (currentBrowseParent) {
+      loadFolderListing({ path: currentBrowseParent });
+    } else {
+      loadFolderListing({ roots: true });
+    }
+  });
+
+  folderBrowserIngestBtn.addEventListener("click", async () => {
+    if (!currentBrowsePath) return;
+    closeFolderBrowser();
+    await ingestDirectory(currentBrowsePath);
+  });
+
+  async function loadFolderListing({ path, roots }) {
+    folderBrowserStatus.textContent = "Loading...";
+    folderBrowserStatus.classList.remove("error");
+    folderBrowserList.innerHTML = "";
+    folderBrowserIngestBtn.disabled = true;
 
     try {
-      const response = await fetch(API_BASE + "/documents/browse-dialog", { method: "POST" });
+      const url = new URL(API_BASE + "/documents/browse");
+      if (roots) {
+        url.searchParams.set("roots", "true");
+      } else if (path) {
+        url.searchParams.set("path", path);
+      }
+
+      const response = await fetch(url);
       const rawBody = await response.text();
 
       let payload = {};
@@ -339,24 +407,69 @@
       }
 
       if (!response.ok) {
-        ingestStatus.textContent = payload.error || rawBody || `Couldn't open the folder dialog (${response.status}).`;
-        ingestStatus.classList.add("error");
+        folderBrowserStatus.textContent = payload.error || rawBody || `Couldn't list that folder (${response.status}).`;
+        folderBrowserStatus.classList.add("error");
         return;
       }
 
-      if (payload.cancelled || !payload.directory) {
-        ingestStatus.textContent = "";
-        return;
-      }
+      currentBrowsePath = payload.path || null;
+      currentBrowseParent = payload.parent || null;
 
-      await ingestDirectory(payload.directory);
+      folderBrowserPath.textContent = currentBrowsePath || "Computer";
+      folderBrowserUpBtn.disabled = currentBrowsePath === null;
+      folderBrowserIngestBtn.disabled = currentBrowsePath === null;
+
+      renderFolderEntries(payload.entries || []);
+      folderBrowserStatus.textContent = "";
     } catch (err) {
-      ingestStatus.textContent = `Couldn't reach the server at ${API_BASE}. (${err.message})`;
-      ingestStatus.classList.add("error");
-    } finally {
-      browseFolderBtn.disabled = false;
+      folderBrowserStatus.textContent = `Couldn't reach the server at ${API_BASE}. (${err.message})`;
+      folderBrowserStatus.classList.add("error");
     }
-  });
+  }
+
+  function renderFolderEntries(entries) {
+    folderBrowserList.innerHTML = "";
+
+    if (entries.length === 0) {
+      const empty = document.createElement("li");
+      empty.className = "modal-empty";
+      empty.textContent = "No subfolders here.";
+      folderBrowserList.appendChild(empty);
+      return;
+    }
+
+    entries.forEach((entry) => {
+      const li = document.createElement("li");
+
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = "modal-folder-row";
+
+      const icon = document.createElement("span");
+      icon.className = "folder-icon";
+      icon.textContent = "\u{1F4C1}";
+
+      const name = document.createElement("span");
+      name.className = "folder-name";
+      name.textContent = entry.name;
+      name.title = entry.path;
+
+      row.appendChild(icon);
+      row.appendChild(name);
+
+      if (entry.pdfCount > 0) {
+        const count = document.createElement("span");
+        count.className = "pdf-count";
+        count.textContent = `${entry.pdfCount} PDF${entry.pdfCount > 1 ? "s" : ""}`;
+        row.appendChild(count);
+      }
+
+      row.addEventListener("click", () => loadFolderListing({ path: entry.path }));
+
+      li.appendChild(row);
+      folderBrowserList.appendChild(li);
+    });
+  }
 
   async function ingestDirectory(directory) {
     ingestProgressWrap.classList.remove("hidden");
