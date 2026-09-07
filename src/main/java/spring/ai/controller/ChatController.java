@@ -121,7 +121,8 @@ public class ChatController {
         Integer page = metadata.get(DocumentMetadataKeys.PAGE) instanceof Number pageNumber
                 ? pageNumber.intValue()
                 : null;
+        Object absolutePath = metadata.get(DocumentMetadataKeys.ABSOLUTE_PATH);
 
-        return new Source(file, page);
+        return new Source(file, page, absolutePath != null ? absolutePath.toString() : null);
     }
 }

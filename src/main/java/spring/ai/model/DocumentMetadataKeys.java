@@ -16,6 +16,14 @@ public final class DocumentMetadataKeys {
     /** 1-based physical page number within the source PDF. */
     public static final String PAGE = "page";
 
+    /**
+     * The file's real absolute path on disk, set only when the document was
+     * ingested by directory path ({@code POST /documents/ingest-directory}).
+     * Browser uploads ({@code POST /documents}) never have this set, since
+     * browsers don't expose a selected file's real location to JavaScript.
+     */
+    public static final String ABSOLUTE_PATH = "absolutePath";
+
     private DocumentMetadataKeys() {
     }
 }

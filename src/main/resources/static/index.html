@@ -25,15 +25,14 @@
       <div class="section">
         <div class="section-label">Documents</div>
 
-        <label for="fileInput" class="upload-btn">
-          Upload PDFs
-        </label>
-        <input type="file" id="fileInput" accept="application/pdf,.pdf" multiple hidden />
+        <button type="button" id="browseFolderBtn" class="upload-btn">
+          Browse Folder&hellip;
+        </button>
 
-        <div class="upload-progress-wrap hidden" id="uploadProgressWrap">
-          <div class="upload-progress-bar" id="uploadProgressBar"></div>
+        <div class="upload-progress-wrap hidden" id="ingestProgressWrap">
+          <div class="upload-progress-bar" id="ingestProgressBar"></div>
         </div>
-        <div class="upload-status" id="uploadStatus"></div>
+        <div class="upload-status" id="ingestStatus"></div>
 
         <ul class="file-list" id="fileList"></ul>
       </div>

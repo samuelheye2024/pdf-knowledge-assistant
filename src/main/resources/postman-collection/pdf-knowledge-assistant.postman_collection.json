@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "PDF Knowledge Assistant",
-    "description": "Endpoints for pdf-knowledge-assistant: chat, RAG chat, and document upload.",
+    "description": "Endpoints for pdf-knowledge-assistant: chat, RAG chat, and directory-based document ingestion.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
     "_postman_id": "b1e6a1e0-2f2a-4a7a-9b1d-0f1c6f6c9a10"
   },
@@ -25,8 +25,12 @@
         ],
         "url": {
           "raw": "{{baseUrl}}/chat",
-          "host": ["{{baseUrl}}"],
-          "path": ["chat"]
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "chat"
+          ]
         },
         "body": {
           "mode": "raw",
@@ -53,8 +57,13 @@
         ],
         "url": {
           "raw": "{{baseUrl}}/chat/rag",
-          "host": ["{{baseUrl}}"],
-          "path": ["chat", "rag"]
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "chat",
+            "rag"
+          ]
         },
         "body": {
           "mode": "raw",
@@ -65,36 +74,63 @@
             }
           }
         },
-        "description": "Chat augmented with similarity search results from the vector store. Response is JSON: {\"answer\": \"...\", \"sources\": [{\"file\": \"...\", \"page\": 1}, ...]}."
+        "description": "Chat augmented with similarity search results from the vector store. Response is JSON: {\"answer\": \"...\", \"sources\": [{\"file\": \"...\", \"page\": 1, \"path\": \"/abs/path/to/file.pdf\"}, ...]}. \"path\" is the file's real absolute location on disk."
       },
       "response": []
     },
     {
-      "name": "Upload Documents",
+      "name": "Browse Folder Dialog",
       "request": {
         "method": "POST",
         "header": [],
         "url": {
-          "raw": "{{baseUrl}}/documents",
-          "host": ["{{baseUrl}}"],
-          "path": ["documents"]
-        },
-        "body": {
-          "mode": "formdata",
-          "formdata": [
-            {
-              "key": "files",
-              "type": "file",
-              "src": []
-            },
-            {
-              "key": "files",
-              "type": "file",
-              "src": []
-            }
+          "raw": "{{baseUrl}}/documents/browse-dialog",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "documents",
+            "browse-dialog"
           ]
         },
-        "description": "Upload one or more PDF files (multipart field name 'files', repeatable). Chunks are embedded and added to the in-memory vector store."
+        "body": {
+          "mode": "raw",
+          "raw": ""
+        },
+        "description": "Pops a native OS folder-picker dialog on the machine running the app and returns the chosen absolute path as {\"directory\": \"...\"}, or {\"cancelled\": true} if dismissed without a selection. Only works when the app is running with a display attached (not headless/containerized) \u2014 calling this from Postman will pop the dialog on whatever machine is running the Spring Boot app, which is a bit unusual outside the app's own UI, but useful for verifying the endpoint directly."
+      },
+      "response": []
+    },
+    {
+      "name": "Ingest Directory",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/documents/ingest-directory",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "documents",
+            "ingest-directory"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"directory\": \"/absolute/path/to/folder\",\n  \"recursive\": true\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "description": "Scans 'directory' on disk for PDFs and adds them to the vector store, reading each file in place (nothing is copied or uploaded). 'recursive' defaults to true when omitted. Each chunk's metadata records the file's real absolute path, which /chat/rag returns in its 'sources'. The UI normally gets 'directory' from 'Browse Folder Dialog' below rather than the user typing it, but this endpoint works standalone too."
       },
       "response": []
     }

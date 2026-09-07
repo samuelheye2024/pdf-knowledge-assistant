@@ -22,11 +22,11 @@
     },
     rag: {
       title: "PDF Knowledge Assistant",
-      desc: "Answers are grounded in the PDFs you've uploaded to the vector store, with sources cited below each answer.",
+      desc: "Answers are grounded in the PDFs you've ingested into the vector store, with sources cited below each answer.",
       endpoint: "/chat/rag",
       badge: "PDF Knowledge Assistant",
       emptyStateHtml:
-        "Ask a question below to get started. Answers will be grounded in your uploaded PDFs, with sources cited below each answer.",
+        "Ask a question below to get started. Answers will be grounded in your ingested PDFs, with sources cited below each answer.",
     },
   };
 
@@ -50,10 +50,10 @@
   const emptyStateText = document.getElementById("emptyStateText");
   const apiBaseLabel = document.getElementById("apiBaseLabel");
 
-  const fileInput = document.getElementById("fileInput");
-  const uploadProgressWrap = document.getElementById("uploadProgressWrap");
-  const uploadProgressBar = document.getElementById("uploadProgressBar");
-  const uploadStatus = document.getElementById("uploadStatus");
+  const browseFolderBtn = document.getElementById("browseFolderBtn");
+  const ingestProgressWrap = document.getElementById("ingestProgressWrap");
+  const ingestProgressBar = document.getElementById("ingestProgressBar");
+  const ingestStatus = document.getElementById("ingestStatus");
   const fileList = document.getElementById("fileList");
 
   apiBaseLabel.textContent = API_BASE.replace(/^https?:\/\//, "");
@@ -199,6 +199,14 @@
       sources.forEach((s) => {
         const li = document.createElement("li");
         li.textContent = s.page != null ? `${s.file} — page ${s.page}` : s.file;
+
+        if (s.path) {
+          const pathEl = document.createElement("span");
+          pathEl.className = "source-path";
+          pathEl.textContent = s.path;
+          li.appendChild(pathEl);
+        }
+
         list.appendChild(li);
       });
       sourcesEl.appendChild(list);
@@ -235,7 +243,7 @@
       const rawBody = await response.text();
 
       if (state.mode === "rag") {
-        // /chat/rag returns JSON: { answer, sources: [{file, page}, ...] }
+        // /chat/rag returns JSON: { answer, sources: [{file, page, path}, ...] }
         let payload = null;
         try {
           payload = JSON.parse(rawBody);
@@ -284,7 +292,9 @@
     sendMessage(question);
   });
 
-  // ---------- Document upload (non-blocking, progress bar) ----------
+  // ---------- Document ingestion by directory path (reads PDFs in place off
+  // disk; nothing is uploaded or duplicated, so citations carry the file's
+  // real absolute path) ----------
 
   function addFileListItem(name) {
     const li = document.createElement("li");
@@ -312,71 +322,89 @@
     item.icon.textContent = status === "success" ? "✓" : status === "error" ? "✕" : "⏳";
   }
 
-  fileInput.addEventListener("change", () => {
-    const files = Array.from(fileInput.files || []);
-    if (files.length === 0) return;
+  browseFolderBtn.addEventListener("click", async () => {
+    browseFolderBtn.disabled = true;
+    ingestStatus.textContent = "Waiting for folder selection...";
+    ingestStatus.classList.remove("error");
 
-    uploadFiles(files);
-    fileInput.value = ""; // allow re-selecting the same file later
-  });
+    try {
+      const response = await fetch(API_BASE + "/documents/browse-dialog", { method: "POST" });
+      const rawBody = await response.text();
 
-  function uploadFiles(files) {
-    const formData = new FormData();
-    files.forEach((f) => formData.append("files", f));
-
-    const items = files.map((f) => addFileListItem(f.name));
-
-    uploadProgressWrap.classList.remove("hidden");
-    uploadProgressBar.style.width = "0%";
-    uploadStatus.textContent = `Uploading ${files.length} file${files.length > 1 ? "s" : ""}...`;
-    uploadStatus.classList.remove("error");
-
-    const xhr = new XMLHttpRequest();
-    xhr.open("POST", API_BASE + "/documents");
-
-    // Upload progress does not block the rest of the UI — chat remains usable
-    // while this runs since it's fully async / event-driven.
-    xhr.upload.addEventListener("progress", (e) => {
-      if (e.lengthComputable) {
-        const pct = Math.round((e.loaded / e.total) * 100);
-        uploadProgressBar.style.width = pct + "%";
-      }
-    });
-
-    xhr.addEventListener("load", () => {
-      let ok = xhr.status >= 200 && xhr.status < 300;
       let payload = {};
       try {
-        payload = JSON.parse(xhr.responseText);
+        payload = JSON.parse(rawBody);
       } catch (_) {
         // non-JSON response
       }
 
-      items.forEach((item) => setFileItemState(item, ok ? "success" : "error"));
-
-      if (ok) {
-        uploadProgressBar.style.width = "100%";
-        uploadStatus.textContent =
-          payload.message ||
-          `Added ${payload.chunksAdded ?? "?"} chunks from ${payload.filesProcessed ?? files.length} file(s).`;
-      } else {
-        uploadStatus.textContent = payload.error || `Upload failed (${xhr.status}).`;
-        uploadStatus.classList.add("error");
+      if (!response.ok) {
+        ingestStatus.textContent = payload.error || rawBody || `Couldn't open the folder dialog (${response.status}).`;
+        ingestStatus.classList.add("error");
+        return;
       }
 
+      if (payload.cancelled || !payload.directory) {
+        ingestStatus.textContent = "";
+        return;
+      }
+
+      await ingestDirectory(payload.directory);
+    } catch (err) {
+      ingestStatus.textContent = `Couldn't reach the server at ${API_BASE}. (${err.message})`;
+      ingestStatus.classList.add("error");
+    } finally {
+      browseFolderBtn.disabled = false;
+    }
+  });
+
+  async function ingestDirectory(directory) {
+    ingestProgressWrap.classList.remove("hidden");
+    ingestProgressBar.style.width = "100%";
+    ingestStatus.textContent = `Scanning ${directory}...`;
+    ingestStatus.classList.remove("error");
+
+    try {
+      const response = await fetch(API_BASE + "/documents/ingest-directory", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ directory }),
+      });
+
+      const rawBody = await response.text();
+      let payload = {};
+      try {
+        payload = JSON.parse(rawBody);
+      } catch (_) {
+        // non-JSON response
+      }
+
+      if (!response.ok) {
+        ingestStatus.textContent = payload.error || rawBody || `Ingest failed (${response.status}).`;
+        ingestStatus.classList.add("error");
+        return;
+      }
+
+      (payload.ingested || []).forEach((name) => {
+        setFileItemState(addFileListItem(name), "success");
+      });
+      (payload.failed || []).forEach((f) => {
+        const item = addFileListItem(f.file);
+        item.li.title = f.error;
+        setFileItemState(item, "error");
+      });
+
+      ingestStatus.textContent =
+        payload.message ||
+        `Added ${payload.chunksAdded ?? "?"} chunks from ${payload.filesProcessed ?? "?"} file(s).`;
+    } catch (err) {
+      ingestStatus.textContent = `Couldn't reach the server at ${API_BASE}. (${err.message})`;
+      ingestStatus.classList.add("error");
+    } finally {
       setTimeout(() => {
-        uploadProgressWrap.classList.add("hidden");
+        ingestProgressWrap.classList.add("hidden");
       }, 1200);
-    });
-
-    xhr.addEventListener("error", () => {
-      items.forEach((item) => setFileItemState(item, "error"));
-      uploadStatus.textContent = `Couldn't reach the server at ${API_BASE}.`;
-      uploadStatus.classList.add("error");
-      uploadProgressWrap.classList.add("hidden");
-    });
-
-    xhr.send(formData);
+    }
   }
 
   // ---------- Init ----------
