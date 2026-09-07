@@ -5,7 +5,7 @@ import org.springframework.ai.reader.pdf.PagePdfDocumentReader;
 import org.springframework.ai.reader.pdf.config.PdfDocumentReaderConfig;
 import org.springframework.ai.transformer.splitter.TextSplitter;
 import org.springframework.ai.transformer.splitter.TokenTextSplitter;
-import org.springframework.ai.vectorstore.SimpleVectorStore;
+import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -23,7 +23,7 @@ import java.util.Map;
 
 /**
  * Accepts PDF uploads (one or more, at any time) and adds their chunked,
- * embedded content to the shared in-memory {@link SimpleVectorStore}, making
+ * embedded content to the shared {@link VectorStore}, making
  * it immediately available to {@code /chat/rag} without an app restart.
  */
 @RestController
@@ -31,9 +31,9 @@ public class DocumentUploadController {
 
     private static final String PDF_EXTENSION = ".pdf";
 
-    private final SimpleVectorStore vectorStore;
+    private final VectorStore vectorStore;
 
-    public DocumentUploadController(SimpleVectorStore vectorStore) {
+    public DocumentUploadController(VectorStore vectorStore) {
         this.vectorStore = vectorStore;
     }
 
