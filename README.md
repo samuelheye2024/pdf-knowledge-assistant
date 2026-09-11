@@ -39,13 +39,11 @@ The app starts on **http://localhost:8080**. The UI is served automatically at t
 
 ## Screenshots
 
-### Standard Chat
-![Standard Chat](screenshots/standard-chat.png)
+### PDF Ingestion
+![PDF Ingestion](screenshots/1.%20PDF%20Ingestion.png)
 
-### PDF Knowledge Assistant (RAG with sources)
-![PDF Knowledge Assistant](screenshots/pdf-knowledge-assistant.png)
-
-Note: the screenshots above show an earlier version of the sidebar with a browser-upload control; documents are now ingested via an in-app folder browser instead (see below).
+### Chat Response with Sources
+![Chat Response with Sources](screenshots/2.%20Chat%20response%20with%20sources.png)
 
 ## UI features
 
