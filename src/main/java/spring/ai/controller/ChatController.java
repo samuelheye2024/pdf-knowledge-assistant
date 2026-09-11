@@ -35,11 +35,13 @@ import java.util.stream.Collectors;
  *
  * <p>{@link IngestionTools} is only made available to {@code /chat/rag} (via a
  * per-call {@code .tools(...)}, not a client-wide default), so the model can
- * call it there — reading and embedding PDFs from a folder, exactly like
- * {@code POST /documents/ingest-directory} does — whenever a question in PDF
- * Knowledge Assistant mode reads like "please ingest the PDFs in
- * ~/Documents/legal". Plain {@code /chat} never sees this tool. This works
- * alongside the "Browse Folder..." button in the UI rather than replacing it.
+ * call {@code ingestUrl} — exactly like {@code POST /documents/ingest-url} —
+ * whenever a question in PDF Knowledge Assistant mode reads like "please
+ * ingest https://example.com/paper.pdf". Plain {@code /chat} never sees this
+ * tool. When the model does call it, the tool's result is returned directly
+ * (see {@link IngestionTools#RESULT_MARKER}) and {@code sources} is omitted
+ * from the response, since the chunks retrieved for that turn weren't
+ * actually what the reply is about.
  */
 @RestController
 public class ChatController {
@@ -52,8 +54,8 @@ public class ChatController {
             section to provide accurate answers. If unsure or if the answer isn't found in the DOCUMENTS section,
             simply state that you don't know the answer.
 
-            If the user is instead asking you to ingest, load, or index PDFs from a folder or path -- rather than
-            asking a question to be answered from the DOCUMENTS section -- call the ingestDirectory tool to do that.
+            If the user is instead asking you to ingest, load, or index a PDF from a URL -- rather than asking a
+            question to be answered from the DOCUMENTS section -- call the ingestUrl tool to do that.
 
             QUESTION:
             {input}
@@ -95,13 +97,21 @@ public class ChatController {
         promptParams.put("input", question);
         promptParams.put("documents", joinContent(retrievedDocuments));
 
-        String answer = chatClient
+        String rawAnswer = chatClient
                 .prompt(promptTemplate.create(promptParams))
                 .tools(ingestionTools)
                 .call()
                 .content();
 
-        return new RagChatResponse(answer, extractSources(retrievedDocuments));
+        if (rawAnswer != null && rawAnswer.startsWith(IngestionTools.RESULT_MARKER)) {
+            // The model ran the ingestUrl tool this turn instead of answering from the
+            // DOCUMENTS section, so the chunks retrieved above were never what the
+            // reply is actually about -- there's nothing meaningful to cite.
+            String answer = rawAnswer.substring(IngestionTools.RESULT_MARKER.length());
+            return new RagChatResponse(answer, List.of());
+        }
+
+        return new RagChatResponse(rawAnswer, extractSources(retrievedDocuments));
     }
 
     private List<Document> retrieveSimilarDocuments(String question) {
@@ -138,8 +148,8 @@ public class ChatController {
         Integer page = metadata.get(DocumentMetadataKeys.PAGE) instanceof Number pageNumber
                 ? pageNumber.intValue()
                 : null;
-        Object absolutePath = metadata.get(DocumentMetadataKeys.ABSOLUTE_PATH);
+        Object sourceUrl = metadata.get(DocumentMetadataKeys.SOURCE_URL);
 
-        return new Source(file, page, absolutePath != null ? absolutePath.toString() : null);
+        return new Source(file, page, sourceUrl != null ? sourceUrl.toString() : null);
     }
 }

@@ -50,22 +50,12 @@
   const emptyStateText = document.getElementById("emptyStateText");
   const apiBaseLabel = document.getElementById("apiBaseLabel");
 
-  const browseFolderBtn = document.getElementById("browseFolderBtn");
+  const ingestUrlForm = document.getElementById("ingestUrlForm");
+  const ingestUrlInput = document.getElementById("ingestUrlInput");
   const ingestProgressWrap = document.getElementById("ingestProgressWrap");
   const ingestProgressBar = document.getElementById("ingestProgressBar");
   const ingestStatus = document.getElementById("ingestStatus");
   const fileList = document.getElementById("fileList");
-
-  const folderBrowserOverlay = document.getElementById("folderBrowserOverlay");
-  const folderBrowserCloseBtn = document.getElementById("folderBrowserCloseBtn");
-  const folderBrowserHomeBtn = document.getElementById("folderBrowserHomeBtn");
-  const folderBrowserComputerBtn = document.getElementById("folderBrowserComputerBtn");
-  const folderBrowserUpBtn = document.getElementById("folderBrowserUpBtn");
-  const folderBrowserPath = document.getElementById("folderBrowserPath");
-  const folderBrowserList = document.getElementById("folderBrowserList");
-  const folderBrowserStatus = document.getElementById("folderBrowserStatus");
-  const folderBrowserCancelBtn = document.getElementById("folderBrowserCancelBtn");
-  const folderBrowserIngestBtn = document.getElementById("folderBrowserIngestBtn");
 
   apiBaseLabel.textContent = API_BASE.replace(/^https?:\/\//, "");
 
@@ -191,20 +181,6 @@
     return { row, content, textSpan };
   }
 
-  // Points a citation at the PDF it was pulled from, read straight off disk
-  // by /documents/file (never copied), jumping to the cited page via the
-  // browser's built-in PDF viewer's #page= fragment (1-based, same as the
-  // page numbers the backend already reports).
-  function buildSourceFileUrl(path, page) {
-    const url = new URL(API_BASE + "/documents/file");
-    url.searchParams.set("path", path);
-    let href = url.toString();
-    if (page != null) {
-      href += `#page=${page}`;
-    }
-    return href;
-  }
-
   function setMessageText(refs, text, isError, sources) {
     refs.textSpan.textContent = text;
     if (isError) {
@@ -225,20 +201,22 @@
         const li = document.createElement("li");
         const label = s.page != null ? `${s.file} — page ${s.page}` : s.file;
 
-        if (s.path) {
+        if (s.sourceUrl) {
+          // Ingested via /documents/ingest-url (or the matching chat tool) -- link
+          // straight to the original URL the PDF was downloaded from.
           const link = document.createElement("a");
           link.className = "source-link";
           link.textContent = label;
-          link.href = buildSourceFileUrl(s.path, s.page);
+          link.href = s.page != null ? `${s.sourceUrl}#page=${s.page}` : s.sourceUrl;
           link.target = "_blank";
           link.rel = "noopener";
-          link.title = `Open ${s.path}${s.page != null ? ` at page ${s.page}` : ""}`;
+          link.title = `Open ${s.sourceUrl}${s.page != null ? ` at page ${s.page}` : ""}`;
           li.appendChild(link);
 
-          const pathEl = document.createElement("span");
-          pathEl.className = "source-path";
-          pathEl.textContent = s.path;
-          li.appendChild(pathEl);
+          const urlEl = document.createElement("span");
+          urlEl.className = "source-path";
+          urlEl.textContent = s.sourceUrl;
+          li.appendChild(urlEl);
         } else {
           li.textContent = label;
         }
@@ -279,7 +257,7 @@
       const rawBody = await response.text();
 
       if (state.mode === "rag") {
-        // /chat/rag returns JSON: { answer, sources: [{file, page, path}, ...] }
+        // /chat/rag returns JSON: { answer, sources: [{file, page, sourceUrl}, ...] }
         let payload = null;
         try {
           payload = JSON.parse(rawBody);
@@ -328,9 +306,8 @@
     sendMessage(question);
   });
 
-  // ---------- Document ingestion by directory path (reads PDFs in place off
-  // disk; nothing is uploaded or duplicated, so citations carry the file's
-  // real absolute path) ----------
+  // ---------- Document ingestion by URL (the server downloads the PDF
+  // itself, so this works for anyone hitting the app from any machine) ----------
 
   function addFileListItem(name) {
     const li = document.createElement("li");
@@ -358,155 +335,25 @@
     item.icon.textContent = status === "success" ? "✓" : status === "error" ? "✕" : "⏳";
   }
 
-  browseFolderBtn.addEventListener("click", () => {
-    openFolderBrowser();
+  ingestUrlForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const url = ingestUrlInput.value.trim();
+    if (!url) return;
+
+    ingestUrl(url);
   });
 
-  // ---------- In-app folder browser modal (backed by GET /documents/browse,
-  // plain java.nio.file directory listing server-side — no OS dialog, no
-  // AWT/Swing, nothing that depends on window-manager focus behavior) ----------
-
-  let currentBrowsePath = null;   // absolute path currently listed, or null while viewing "Computer" (roots)
-  let currentBrowseParent = null; // absolute path "Up" should go to, or null if there isn't one
-
-  function openFolderBrowser() {
-    folderBrowserOverlay.classList.remove("hidden");
-    loadFolderListing({});
-  }
-
-  function closeFolderBrowser() {
-    folderBrowserOverlay.classList.add("hidden");
-  }
-
-  folderBrowserCloseBtn.addEventListener("click", closeFolderBrowser);
-  folderBrowserCancelBtn.addEventListener("click", closeFolderBrowser);
-
-  folderBrowserOverlay.addEventListener("click", (e) => {
-    if (e.target === folderBrowserOverlay) closeFolderBrowser();
-  });
-
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && !folderBrowserOverlay.classList.contains("hidden")) {
-      closeFolderBrowser();
-    }
-  });
-
-  folderBrowserHomeBtn.addEventListener("click", () => loadFolderListing({}));
-  folderBrowserComputerBtn.addEventListener("click", () => loadFolderListing({ roots: true }));
-  folderBrowserUpBtn.addEventListener("click", () => {
-    if (currentBrowseParent) {
-      loadFolderListing({ path: currentBrowseParent });
-    } else {
-      loadFolderListing({ roots: true });
-    }
-  });
-
-  folderBrowserIngestBtn.addEventListener("click", async () => {
-    if (!currentBrowsePath) return;
-    closeFolderBrowser();
-    await ingestDirectory(currentBrowsePath);
-  });
-
-  async function loadFolderListing({ path, roots }) {
-    folderBrowserStatus.textContent = "Loading...";
-    folderBrowserStatus.classList.remove("error");
-    folderBrowserList.innerHTML = "";
-    folderBrowserIngestBtn.disabled = true;
-
-    try {
-      const url = new URL(API_BASE + "/documents/browse");
-      if (roots) {
-        url.searchParams.set("roots", "true");
-      } else if (path) {
-        url.searchParams.set("path", path);
-      }
-
-      const response = await fetch(url);
-      const rawBody = await response.text();
-
-      let payload = {};
-      try {
-        payload = JSON.parse(rawBody);
-      } catch (_) {
-        // non-JSON response
-      }
-
-      if (!response.ok) {
-        folderBrowserStatus.textContent = payload.error || rawBody || `Couldn't list that folder (${response.status}).`;
-        folderBrowserStatus.classList.add("error");
-        return;
-      }
-
-      currentBrowsePath = payload.path || null;
-      currentBrowseParent = payload.parent || null;
-
-      folderBrowserPath.textContent = currentBrowsePath || "Computer";
-      folderBrowserUpBtn.disabled = currentBrowsePath === null;
-      folderBrowserIngestBtn.disabled = currentBrowsePath === null;
-
-      renderFolderEntries(payload.entries || []);
-      folderBrowserStatus.textContent = "";
-    } catch (err) {
-      folderBrowserStatus.textContent = `Couldn't reach the server at ${API_BASE}. (${err.message})`;
-      folderBrowserStatus.classList.add("error");
-    }
-  }
-
-  function renderFolderEntries(entries) {
-    folderBrowserList.innerHTML = "";
-
-    if (entries.length === 0) {
-      const empty = document.createElement("li");
-      empty.className = "modal-empty";
-      empty.textContent = "No subfolders here.";
-      folderBrowserList.appendChild(empty);
-      return;
-    }
-
-    entries.forEach((entry) => {
-      const li = document.createElement("li");
-
-      const row = document.createElement("button");
-      row.type = "button";
-      row.className = "modal-folder-row";
-
-      const icon = document.createElement("span");
-      icon.className = "folder-icon";
-      icon.textContent = "\u{1F4C1}";
-
-      const name = document.createElement("span");
-      name.className = "folder-name";
-      name.textContent = entry.name;
-      name.title = entry.path;
-
-      row.appendChild(icon);
-      row.appendChild(name);
-
-      if (entry.pdfCount > 0) {
-        const count = document.createElement("span");
-        count.className = "pdf-count";
-        count.textContent = `${entry.pdfCount} PDF${entry.pdfCount > 1 ? "s" : ""}`;
-        row.appendChild(count);
-      }
-
-      row.addEventListener("click", () => loadFolderListing({ path: entry.path }));
-
-      li.appendChild(row);
-      folderBrowserList.appendChild(li);
-    });
-  }
-
-  async function ingestDirectory(directory) {
+  async function ingestUrl(url) {
     ingestProgressWrap.classList.remove("hidden");
     ingestProgressBar.style.width = "100%";
-    ingestStatus.textContent = `Scanning ${directory}...`;
+    ingestStatus.textContent = `Fetching ${url}...`;
     ingestStatus.classList.remove("error");
 
     try {
-      const response = await fetch(API_BASE + "/documents/ingest-directory", {
+      const response = await fetch(API_BASE + "/documents/ingest-url", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ directory }),
+        body: JSON.stringify({ url }),
       });
 
       const rawBody = await response.text();
@@ -523,18 +370,13 @@
         return;
       }
 
-      (payload.ingested || []).forEach((name) => {
-        setFileItemState(addFileListItem(name), "success");
-      });
-      (payload.failed || []).forEach((f) => {
-        const item = addFileListItem(f.file);
-        item.li.title = f.error;
-        setFileItemState(item, "error");
-      });
-
+      setFileItemState(addFileListItem(payload.file || url), "success");
+      // Always show the actual chunk count -- a message alone ("Document ingested
+      // from URL") can't be told apart from a 0-chunk no-op, which is exactly the
+      // failure mode that's easy to miss.
       ingestStatus.textContent =
-        payload.message ||
-        `Added ${payload.chunksAdded ?? "?"} chunks from ${payload.filesProcessed ?? "?"} file(s).`;
+        `Added ${payload.chunksAdded ?? "?"} chunk(s) from ${payload.file ?? url}.`;
+      ingestUrlInput.value = "";
     } catch (err) {
       ingestStatus.textContent = `Couldn't reach the server at ${API_BASE}. (${err.message})`;
       ingestStatus.classList.add("error");

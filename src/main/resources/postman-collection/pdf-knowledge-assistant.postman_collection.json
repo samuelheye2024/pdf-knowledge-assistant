@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "PDF Knowledge Assistant",
-    "description": "Endpoints for pdf-knowledge-assistant: chat, RAG chat, and directory-based document ingestion.",
+    "description": "Endpoints for pdf-knowledge-assistant: chat, RAG chat, and URL-based document ingestion.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
     "_postman_id": "b1e6a1e0-2f2a-4a7a-9b1d-0f1c6f6c9a10"
   },
@@ -12,12 +12,7 @@
       "type": "string"
     },
     {
-      "key": "browsePath",
-      "value": "",
-      "type": "string"
-    },
-    {
-      "key": "filePath",
+      "key": "pdfUrl",
       "value": "",
       "type": "string"
     }
@@ -84,44 +79,12 @@
             }
           }
         },
-        "description": "Chat augmented with similarity search results from the vector store. Response is JSON: {\"answer\": \"...\", \"sources\": [{\"file\": \"...\", \"page\": 1, \"path\": \"/abs/path/to/file.pdf\"}, ...]}. \"path\" is the file's real absolute location on disk."
+        "description": "Chat augmented with similarity search results from the vector store. Response is JSON: {\"answer\": \"...\", \"sources\": [{\"file\": \"...\", \"page\": 1, \"sourceUrl\": \"...\"}, ...]}. \"sources\" comes back empty when the model instead ran the ingestUrl tool for that turn."
       },
       "response": []
     },
     {
-      "name": "Browse Directory",
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{baseUrl}}/documents/browse?path={{browsePath}}",
-          "host": [
-            "{{baseUrl}}"
-          ],
-          "path": [
-            "documents",
-            "browse"
-          ],
-          "query": [
-            {
-              "key": "path",
-              "value": "{{browsePath}}",
-              "description": "Absolute directory to list. Omit (or leave blank) to list the home directory."
-            },
-            {
-              "key": "roots",
-              "value": "true",
-              "description": "List filesystem roots instead (drive letters on Windows, / on macOS/Linux). Disable this query param to use 'path' instead.",
-              "disabled": true
-            }
-          ]
-        },
-        "description": "Lists a directory's subfolders using plain java.nio.file calls \u2014 no OS dialog, no AWT. Omit 'path' to list the home directory, or enable the 'roots' query param to list filesystem roots (drive letters on Windows, / on macOS/Linux) instead. Each entry includes 'pdfCount', a non-recursive count of PDFs directly inside it. The UI's 'Browse Folder\u2026' button drives this endpoint to render an in-app folder browser; 'Ingest Directory' below then does the actual ingestion once you've picked a folder."
-      },
-      "response": []
-    },
-    {
-      "name": "Ingest Directory",
+      "name": "Ingest URL",
       "request": {
         "method": "POST",
         "header": [
@@ -131,51 +94,25 @@
           }
         ],
         "url": {
-          "raw": "{{baseUrl}}/documents/ingest-directory",
+          "raw": "{{baseUrl}}/documents/ingest-url",
           "host": [
             "{{baseUrl}}"
           ],
           "path": [
             "documents",
-            "ingest-directory"
+            "ingest-url"
           ]
         },
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"directory\": \"/absolute/path/to/folder\",\n  \"recursive\": true\n}",
+          "raw": "{\n  \"url\": \"{{pdfUrl}}\"\n}",
           "options": {
             "raw": {
               "language": "json"
             }
           }
         },
-        "description": "Scans 'directory' on disk for PDFs and adds them to the vector store, reading each file in place (nothing is copied or uploaded). 'recursive' defaults to true when omitted. Each chunk's metadata records the file's real absolute path, which /chat/rag returns in its 'sources'. The UI normally gets 'directory' from the in-app folder browser ('Browse Directory' above) rather than the user typing it, but this endpoint works standalone too."
-      },
-      "response": []
-    },
-    {
-      "name": "Get Document File",
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{baseUrl}}/documents/file?path={{filePath}}",
-          "host": [
-            "{{baseUrl}}"
-          ],
-          "path": [
-            "documents",
-            "file"
-          ],
-          "query": [
-            {
-              "key": "path",
-              "value": "{{filePath}}",
-              "description": "Absolute path to an already-ingested .pdf file, as returned in a /chat/rag source's 'path' field."
-            }
-          ]
-        },
-        "description": "Streams the PDF at 'path' straight off disk (Content-Type: application/pdf, Content-Disposition: inline) so it can be opened directly \u2014 nothing is copied. This is what each clickable citation in the UI links to, with a '#page=N' fragment appended client-side to jump to the cited page. Trusts any existing, readable .pdf path it's given; fine for a personal, localhost-only tool, not something to expose beyond that without adding access checks."
+        "description": "Downloads the PDF at 'url' and adds it to the vector store. Works for a caller on any machine, since the server fetches the URL itself rather than reading a local path. Refuses private/internal addresses (SSRF guard), caps the download at 25 MB, and checks the downloaded bytes actually start with a PDF's magic header. Citations for these carry 'sourceUrl' in /chat/rag's 'sources'."
       },
       "response": []
     }

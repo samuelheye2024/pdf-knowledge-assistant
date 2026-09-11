@@ -1,6 +1,6 @@
 # PDF Knowledge Assistant
 
-Spring Boot + Spring AI app that exposes a chat API (plain and RAG-over-PDFs) backed by a Postgres/pgvector vector store, plus a ChatGPT-style web UI. Documents are ingested by pointing the app at a folder already on disk — browsed via an in-app folder browser, not a browser upload — so RAG citations can point at a document's real absolute location.
+Spring Boot + Spring AI app that exposes a chat API (plain and RAG-over-PDFs) backed by a Postgres/pgvector vector store, plus a ChatGPT-style web UI. Documents get in by handing the app a public URL to a PDF, which the server downloads and ingests itself -- this works for anyone hitting the app, from any machine, since the server does the fetching rather than reading a path off its own disk.
 
 ## Postgres + pgvector setup
 
@@ -39,40 +39,35 @@ The app starts on **http://localhost:8080**. The UI is served automatically at t
 
 ## Screenshots
 
-### PDF Ingestion
-![PDF Ingestion](screenshots/1.%20PDF%20Ingestion.png)
-
-### Chat Response with Sources
-![Chat Response with Sources](screenshots/2.%20Chat%20response%20with%20sources.png)
-
-### Ingesting PDFs via Chat
-![Ingesting PDFs via Chat](screenshots/3.%20Ingesting%20PDFs%20via%20Chat,%20using%20pdf%20ingestion%20tool.png)
+### PDF Knowledge Assistant
+![PDF Knowledge Assistant](screenshots/1.%20PDF%20Knowledge%20Assistant.png)
 
 ### pgvector Vector Store
-![pgvector Vector Store](screenshots/pgvector%20-%20vector%20store.png)
+![pgvector Vector Store](screenshots/2.%20pgvector%20-%20vector%20store.png)
+
+### Standard Chat
+![Standard Chat](screenshots/3.%20%20Standard%20Chat.png)
 
 ## UI features
 
 - **Standard Chat** mode — talks directly to the model (`POST /chat`).
-- **PDF Knowledge Assistant** mode — RAG over your ingested PDFs (`POST /chat/rag`), with a **Sources** list (file, page, and absolute path) shown under each answer. Each citation is a clickable link (backed by `GET /documents/file`) that opens the actual PDF, straight off disk, at the cited page — nothing is copied or uploaded to show it.
-- **Browse Folder…** from the sidebar — opens an in-app folder browser (a modal backed by `GET /documents/browse`, which lists subfolders with plain `java.nio.file` directory listing, no OS dialog involved). Click through folders (or jump to **Home** / **Computer**, or go **Up**) and hit **Ingest This Folder** on whichever one you land on. Every PDF under it (recursively, by default) is then read in place and added to the vector store (`POST /documents/ingest-directory`). Nothing is copied or uploaded: the app reads each file straight from where it already lives, so citations carry the document's real absolute path.
-- Inside **PDF Knowledge Assistant** mode, you can also just ask for it in the chat box — e.g. *"please ingest the PDFs in ~/Documents/legal"*. This is a Spring AI [`@Tool`](https://docs.spring.io/spring-ai/reference/api/tools.html) (`IngestionTools.ingestDirectory`) made available to `/chat/rag` alone (a per-request tool, not a client-wide default), so the model calls it when it recognizes an ingestion request; it shares the exact same `IngestionService` as the folder-browser button and the REST endpoint, so all three paths behave identically. `~` is expanded to your home directory since that's how paths are naturally typed. **Standard Chat** mode never sees this tool. This is an alternative to the button, not a replacement for it.
+- **PDF Knowledge Assistant** mode — RAG over your ingested PDFs (`POST /chat/rag`), with a **Sources** list (file, page, and source URL) shown under each answer. Each citation is a clickable link straight to the URL the PDF was downloaded from. When a question is actually an ingestion request handled by the `ingestUrl` tool rather than answered from the knowledge base, the response has no sources -- there's nothing to cite.
+- **Ingest a PDF from a URL**, in the sidebar — downloads a single PDF from a public `http(s)` URL and ingests it (`POST /documents/ingest-url`). This works for anyone, from any machine, since the server does the fetching itself.
+- Inside **PDF Knowledge Assistant** mode, you can also just ask for this in the chat box — e.g. *"please ingest https://example.com/paper.pdf"*. This is a Spring AI [`@Tool`](https://docs.spring.io/spring-ai/reference/api/tools.html) method (`IngestionTools.ingestUrl`) made available to `/chat/rag` alone (a per-request tool, not a client-wide default), so the model calls it when it recognizes an ingestion request; it shares the exact same `IngestionService` as the sidebar's URL field and REST endpoint, so behavior never diverges. **Standard Chat** mode never sees this tool. It's an alternative to the sidebar field, not a replacement for it.
 - Mode is locked once you send your first message in a chat — start a **New Chat** to switch between Standard Chat and Knowledge Assistant.
 - Stateless: each question is sent independently, no conversation history is kept server-side.
 
-Note: the vector store is backed by Postgres/pgvector — ingested documents persist across app restarts. The folder browser works identically on Windows, macOS, and Linux — it's rendered entirely in the browser from a plain directory listing, so there's no native dialog, no AWT/Swing, and no window-manager focus behavior to depend on.
+Note: the vector store is backed by Postgres/pgvector — ingested documents persist across app restarts.
 
 ## API endpoints
 
-| Method | Path                          | Query / Body                                       | Response                                                                                                             |
-|--------|-------------------------------|-------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------|
-| POST   | `/chat`                       | `{"q": "..."}`                                         | plain text answer                                                                                                        |
-| POST   | `/chat/rag`                   | `{"q": "..."}`                                         | `{"answer": "...", "sources": [{"file": "...", "page": 1, "path": "..."}, ...]}`                                         |
-| GET    | `/documents/browse`           | `?path=/abs/path` or `?roots=true` (both optional)     | `{"path": "...", "parent": "...", "entries": [{"name": "...", "path": "...", "pdfCount": N}, ...]}`                      |
-| POST   | `/documents/ingest-directory` | `{"directory": "/abs/path", "recursive": true}`        | `{"message": "...", "directory": "...", "filesProcessed": N, "chunksAdded": N, "ingested": [...], "failed": [...]}`      |
-| GET    | `/documents/file`             | `?path=/abs/path/to/file.pdf`                          | the PDF's raw bytes, `Content-Type: application/pdf`, `Content-Disposition: inline`                                      |
+| Method | Path                    | Query / Body                       | Response                                                                                          |
+|--------|-------------------------|-------------------------------------|-----------------------------------------------------------------------------------------------------|
+| POST   | `/chat`                 | `{"q": "..."}`                       | plain text answer                                                                                    |
+| POST   | `/chat/rag`             | `{"q": "..."}`                       | `{"answer": "...", "sources": [{"file": "...", "page": 1, "sourceUrl": "..."}, ...]}`                |
+| POST   | `/documents/ingest-url` | `{"url": "https://.../paper.pdf"}`   | `{"message": "...", "url": "...", "file": "...", "chunksAdded": N}`                                  |
 
-`/chat/rag`'s `sources` are the actual document chunks retrieved from the vector store for that question (deduped by file + page) — not something the model is asked to guess, so they're always accurate to what was fed into the prompt, and `path` is the file's real absolute location on disk. `/documents/browse` lists a directory's subfolders (omit `path` for the home directory, or pass `roots=true` to list filesystem roots — drive letters on Windows, `/` on macOS/Linux) using plain `java.nio.file` calls; hidden and unreadable entries are filtered out, and each entry's `pdfCount` is a non-recursive count of PDFs directly inside it. `/documents/ingest-directory` then reads each PDF directly from the chosen folder in place; nothing is copied or uploaded. `recursive` defaults to `true` when omitted. Re-ingesting the same file adds duplicate chunks rather than replacing the old ones — there's no dedup/upsert yet. `/documents/file` streams a cited PDF straight off disk (also in place, never copied) so the UI can link each citation directly to its source, jumping to the cited page; it trusts whatever path it's given as long as it's an existing, readable `.pdf` file, which is fine for a personal, localhost-only tool but not something to expose beyond that without adding access checks.
+`/chat/rag`'s `sources` are the actual document chunks retrieved from the vector store for that question (deduped by file + page) — not something the model is asked to guess, so they're always accurate to what was fed into the prompt. `sources` comes back empty whenever the model instead ran the `ingestUrl` tool for that turn, since the retrieved chunks weren't what the reply was actually about. `/documents/ingest-url` downloads a single PDF from a public URL and adds it to the vector store — the server does the fetching itself, so this works identically for a caller on any machine. Because it fetches a URL handed to it by whoever calls the endpoint, it refuses to fetch loopback/private/link-local addresses (a basic SSRF guard), caps the download at 25 MB, and checks the downloaded bytes actually start with a PDF's magic header rather than trusting `Content-Type`. Re-ingesting the same URL adds duplicate chunks rather than replacing the old ones — there's no dedup/upsert yet.
 
 A Postman collection (`src/main/resources/postman-collection/pdf-knowledge-assistant.postman_collection.json`) is included for testing these directly.
 

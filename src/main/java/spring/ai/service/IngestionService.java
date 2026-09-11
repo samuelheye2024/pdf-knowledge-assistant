@@ -3,38 +3,41 @@ package spring.ai.service;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.reader.pdf.PagePdfDocumentReader;
 import org.springframework.ai.reader.pdf.config.PdfDocumentReaderConfig;
-import org.springframework.ai.transformer.splitter.TextSplitter;
 import org.springframework.ai.transformer.splitter.TokenTextSplitter;
 import org.springframework.ai.vectorstore.VectorStore;
-import org.springframework.core.io.FileSystemResource;
+import org.springframework.core.io.ByteArrayResource;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 import spring.ai.model.DocumentMetadataKeys;
 
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.ArrayList;
+import java.net.InetAddress;
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.net.UnknownHostException;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Stream;
 
 /**
- * Scans a directory for PDFs and adds them to the vector store, reading each
- * file in place off disk (never copied or uploaded) so chunk metadata can
- * carry the file's real absolute path.
+ * Downloads a single PDF from a public URL and adds it to the vector store.
+ * The server does the fetching itself over HTTP, so this works identically
+ * no matter which machine the request came from.
  *
- * <p>This is the one place that logic lives — both {@code POST
- * /documents/ingest-directory} ({@link spring.ai.controller.DocumentUploadController})
- * and the chat-callable {@code ingestDirectory} tool
- * ({@link spring.ai.tool.IngestionTools}) call into it, so the button-driven
- * folder browser and "please ingest ~/Documents/legal" in the chat box can
- * never behave differently from one another.
+ * <p>{@code POST /documents/ingest-url} ({@link spring.ai.controller.DocumentUploadController})
+ * and the chat-callable {@code ingestUrl} tool ({@link spring.ai.tool.IngestionTools})
+ * both call {@link #ingestUrl}, so they can never drift apart.
  */
 @Service
 public class IngestionService {
 
     private static final String PDF_EXTENSION = ".pdf";
+
+    /** Hard cap on how much of a remote URL's body we'll buffer in memory. */
+    private static final long MAX_DOWNLOAD_BYTES = 25L * 1024 * 1024;
 
     private final VectorStore vectorStore;
 
@@ -43,80 +46,39 @@ public class IngestionService {
     }
 
     /**
-     * Resolves {@code rawPath} (expanding a leading {@code ~} to the user's
-     * home directory, since that's how paths are naturally typed in chat —
-     * the REST endpoint's folder browser never sends one, so this is a no-op
-     * there), scans it for PDFs, reads and embeds each one, and adds the
-     * resulting chunks to the vector store.
+     * Downloads the PDF at {@code rawUrl} and adds it to the vector store.
+     * Because that means fetching a URL an untrusted remote caller handed
+     * us, this refuses private/internal addresses (SSRF guard), caps how
+     * much it will download, and checks the downloaded bytes actually start
+     * with a PDF's magic header rather than trusting the response's
+     * {@code Content-Type}.
      *
-     * @throws IllegalArgumentException if {@code rawPath} is blank, doesn't
-     *         resolve to a directory, or that directory has no PDFs in it
-     * @throws IOException if the directory can't be scanned
+     * @throws IllegalArgumentException if the URL is blank, isn't
+     *         http(s), resolves to a private/internal address, or the
+     *         downloaded content isn't a PDF
+     * @throws IOException if the URL can't be fetched
      */
-    public IngestResult ingestDirectory(String rawPath, boolean recursive) throws IOException {
-        if (rawPath == null || rawPath.isBlank()) {
-            throw new IllegalArgumentException("A non-blank directory path is required");
+    public UrlIngestResult ingestUrl(String rawUrl) throws IOException {
+        if (rawUrl == null || rawUrl.isBlank()) {
+            throw new IllegalArgumentException("A non-blank URL is required");
         }
 
-        Path directory = resolve(rawPath);
+        URI uri = parseHttpUri(rawUrl.trim());
+        assertNotInternalAddress(uri);
 
-        if (!Files.isDirectory(directory)) {
-            throw new IllegalArgumentException("Not a directory: " + directory);
+        byte[] content = download(uri);
+
+        if (!looksLikePdf(content)) {
+            throw new IllegalArgumentException("The content at that URL doesn't look like a PDF: " + rawUrl);
         }
 
-        List<Path> pdfFiles = findPdfFiles(directory, recursive);
-
-        if (pdfFiles.isEmpty()) {
-            throw new IllegalArgumentException("No PDF files found in: " + directory);
-        }
-
-        TextSplitter textSplitter = new TokenTextSplitter();
-        List<Document> allChunks = new ArrayList<>();
-        List<String> ingested = new ArrayList<>();
-        List<Map<String, String>> failed = new ArrayList<>();
-
-        for (Path pdfFile : pdfFiles) {
-            try {
-                allChunks.addAll(readAndSplit(pdfFile, textSplitter));
-                ingested.add(pdfFile.getFileName().toString());
-            } catch (IOException e) {
-                failed.add(Map.of("file", pdfFile.toString(), "error", String.valueOf(e.getMessage())));
+        String filename = filenameFromUrl(uri);
+        Resource resource = new ByteArrayResource(content) {
+            @Override
+            public String getFilename() {
+                return filename;
             }
-        }
-
-        if (!allChunks.isEmpty()) {
-            vectorStore.add(allChunks);
-        }
-
-        return new IngestResult(directory.toString(), ingested.size(), allChunks.size(), ingested, failed);
-    }
-
-    /** Expands a leading {@code ~} to the user's home directory, then normalizes to an absolute path. */
-    private Path resolve(String rawPath) {
-        String expanded = rawPath.equals("~") || rawPath.startsWith("~/") || rawPath.startsWith("~\\")
-                ? System.getProperty("user.home") + rawPath.substring(1)
-                : rawPath;
-        return Path.of(expanded).toAbsolutePath().normalize();
-    }
-
-    private List<Path> findPdfFiles(Path directory, boolean recursive) throws IOException {
-        try (Stream<Path> stream = recursive ? Files.walk(directory) : Files.list(directory)) {
-            return stream
-                    .filter(Files::isRegularFile)
-                    .filter(path -> path.getFileName().toString().toLowerCase().endsWith(PDF_EXTENSION))
-                    .sorted()
-                    .toList();
-        }
-    }
-
-    /**
-     * Reads a single PDF directly from disk by path (one {@link Document}
-     * per physical page), stamps it with filename/page/absolute-path
-     * metadata, and splits it into embeddable chunks. The file is read in
-     * place, never copied.
-     */
-    private List<Document> readAndSplit(Path pdfFile, TextSplitter textSplitter) throws IOException {
-        Resource resource = new FileSystemResource(pdfFile);
+        };
 
         PdfDocumentReaderConfig config = PdfDocumentReaderConfig
                 .builder()
@@ -124,31 +86,135 @@ public class IngestionService {
                 .build();
 
         List<Document> pages = new PagePdfDocumentReader(resource, config).get();
-        stampSourceMetadata(pages, pdfFile.getFileName().toString(), pdfFile.toString());
+        stampUrlSourceMetadata(pages, filename, rawUrl.trim());
 
-        return textSplitter.apply(pages);
+        List<Document> chunks = new TokenTextSplitter().apply(pages);
+
+        if (chunks.isEmpty()) {
+            // Downloaded fine and passed the PDF magic-byte check, but the reader found
+            // no extractable text -- most often a scanned/image-only PDF with no text
+            // layer. Treating this as a silent success would add nothing to the vector
+            // store while still reporting "ingested", which is worse than just saying so.
+            throw new IllegalArgumentException(
+                    "No extractable text found in the PDF at " + rawUrl
+                            + " -- it may be a scanned/image-only PDF with no text layer.");
+        }
+
+        vectorStore.add(chunks);
+
+        return new UrlIngestResult(rawUrl.trim(), filename, chunks.size());
+    }
+
+    private URI parseHttpUri(String rawUrl) {
+        URI uri;
+        try {
+            uri = new URI(rawUrl);
+        } catch (URISyntaxException e) {
+            throw new IllegalArgumentException("Not a valid URL: " + rawUrl);
+        }
+
+        String scheme = uri.getScheme();
+        if (scheme == null || !(scheme.equalsIgnoreCase("http") || scheme.equalsIgnoreCase("https"))) {
+            throw new IllegalArgumentException("Only http:// and https:// URLs are supported: " + rawUrl);
+        }
+        if (uri.getHost() == null) {
+            throw new IllegalArgumentException("URL has no host: " + rawUrl);
+        }
+
+        return uri;
     }
 
     /**
-     * Stamps our own source/page/path metadata explicitly (rather than
-     * relying on whatever keys the reader may or may not set) so citations
-     * are reliable downstream when answering RAG questions.
+     * Refuses to fetch a URL that resolves to a loopback, link-local (this
+     * covers cloud metadata endpoints like {@code 169.254.169.254}), private
+     * (RFC 1918), or multicast address — a basic SSRF guard, since this
+     * method exists specifically to fetch a URL handed to us by a caller we
+     * don't otherwise trust.
      */
-    private void stampSourceMetadata(List<Document> pages, String filename, String absolutePath) {
+    private void assertNotInternalAddress(URI uri) throws IOException {
+        InetAddress address;
+        try {
+            address = InetAddress.getByName(uri.getHost());
+        } catch (UnknownHostException e) {
+            throw new IllegalArgumentException("Couldn't resolve host: " + uri.getHost());
+        }
+
+        if (address.isLoopbackAddress() || address.isLinkLocalAddress()
+                || address.isSiteLocalAddress() || address.isAnyLocalAddress()
+                || address.isMulticastAddress()) {
+            throw new IllegalArgumentException(
+                    "Refusing to fetch from a private or internal address: " + uri.getHost());
+        }
+    }
+
+    private byte[] download(URI uri) throws IOException {
+        HttpClient client = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(10))
+                .followRedirects(HttpClient.Redirect.NORMAL)
+                .build();
+
+        HttpRequest request = HttpRequest.newBuilder(uri)
+                .timeout(Duration.ofSeconds(30))
+                .GET()
+                .build();
+
+        HttpResponse<byte[]> response;
+        try {
+            response = client.send(request, HttpResponse.BodyHandlers.ofByteArray());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Interrupted while downloading " + uri, e);
+        }
+
+        if (response.statusCode() / 100 != 2) {
+            throw new IOException("Fetching " + uri + " failed with HTTP " + response.statusCode());
+        }
+
+        byte[] body = response.body();
+        if (body.length == 0) {
+            throw new IllegalArgumentException("No content received from " + uri);
+        }
+        if (body.length > MAX_DOWNLOAD_BYTES) {
+            throw new IllegalArgumentException(
+                    "File at " + uri + " is larger than the " + (MAX_DOWNLOAD_BYTES / (1024 * 1024)) + " MB limit");
+        }
+
+        return body;
+    }
+
+    /** Checks the PDF magic header ({@code %PDF-}) rather than trusting Content-Type, which the server can fake. */
+    private boolean looksLikePdf(byte[] content) {
+        return content.length >= 5
+                && content[0] == '%' && content[1] == 'P' && content[2] == 'D' && content[3] == 'F' && content[4] == '-';
+    }
+
+    /** Derives a display filename from the URL's last path segment, falling back to the host name. */
+    private String filenameFromUrl(URI uri) {
+        String path = uri.getPath();
+        if (path != null && !path.isBlank()) {
+            String last = path.substring(path.lastIndexOf('/') + 1);
+            if (!last.isBlank()) {
+                return last.toLowerCase().endsWith(PDF_EXTENSION) ? last : last + PDF_EXTENSION;
+            }
+        }
+        return (uri.getHost() != null ? uri.getHost() : "document") + PDF_EXTENSION;
+    }
+
+    /**
+     * Stamps source/page/URL metadata explicitly (rather than relying on
+     * whatever keys the reader may or may not set) so citations are
+     * reliable downstream when answering RAG questions.
+     */
+    private void stampUrlSourceMetadata(List<Document> pages, String filename, String sourceUrl) {
         for (int i = 0; i < pages.size(); i++) {
             Map<String, Object> metadata = pages.get(i).getMetadata();
             metadata.put(DocumentMetadataKeys.SOURCE, filename);
             metadata.put(DocumentMetadataKeys.PAGE, i + 1);
-            metadata.put(DocumentMetadataKeys.ABSOLUTE_PATH, absolutePath);
+            metadata.put(DocumentMetadataKeys.SOURCE_URL, sourceUrl);
         }
     }
 
-    /** Result of a directory ingestion: how much was added, and which files (if any) failed. */
-    public record IngestResult(
-            String directory,
-            int filesProcessed,
-            int chunksAdded,
-            List<String> ingested,
-            List<Map<String, String>> failed) {
+    /** Result of a URL ingestion: the URL, the derived filename, and how many chunks were added. */
+    public record UrlIngestResult(String url, String file, int chunksAdded) {
     }
 }

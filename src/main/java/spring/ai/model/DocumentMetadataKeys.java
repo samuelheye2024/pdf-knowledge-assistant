@@ -17,12 +17,10 @@ public final class DocumentMetadataKeys {
     public static final String PAGE = "page";
 
     /**
-     * The file's real absolute path on disk, set only when the document was
-     * ingested by directory path ({@code POST /documents/ingest-directory}).
-     * Browser uploads ({@code POST /documents}) never have this set, since
-     * browsers don't expose a selected file's real location to JavaScript.
+     * The public URL a document was fetched from ({@code POST
+     * /documents/ingest-url}, or the matching chat tool).
      */
-    public static final String ABSOLUTE_PATH = "absolutePath";
+    public static final String SOURCE_URL = "sourceUrl";
 
     private DocumentMetadataKeys() {
     }
