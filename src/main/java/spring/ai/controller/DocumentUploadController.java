@@ -1,11 +1,5 @@
 package spring.ai.controller;
 
-import org.springframework.ai.document.Document;
-import org.springframework.ai.reader.pdf.PagePdfDocumentReader;
-import org.springframework.ai.reader.pdf.config.PdfDocumentReaderConfig;
-import org.springframework.ai.transformer.splitter.TextSplitter;
-import org.springframework.ai.transformer.splitter.TokenTextSplitter;
-import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
 import org.springframework.http.HttpHeaders;
@@ -18,7 +12,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import spring.ai.dto.IngestDirectoryRequest;
-import spring.ai.model.DocumentMetadataKeys;
+import spring.ai.service.IngestionService;
 
 import java.io.IOException;
 import java.nio.file.FileSystems;
@@ -32,14 +26,18 @@ import java.util.Map;
 import java.util.stream.Stream;
 
 /**
- * Ingests PDFs into the shared {@link VectorStore} by reading them directly
- * off disk, given a directory to scan ({@code POST /documents/ingest-directory}).
- * {@code GET /documents/browse} lists a directory's subfolders (plain
- * {@code java.nio.file}, no native UI toolkit involved) so the frontend can
- * render an in-app, click-through folder browser — no OS dialog, no AWT/Swing,
- * no window-manager focus quirks to fight, and no headless-mode footgun.
+ * Ingests PDFs into the vector store, given a directory to scan
+ * ({@code POST /documents/ingest-directory}). {@code GET /documents/browse}
+ * lists a directory's subfolders (plain {@code java.nio.file}, no native UI
+ * toolkit involved) so the frontend can render an in-app, click-through
+ * folder browser — no OS dialog, no AWT/Swing, no window-manager focus
+ * quirks to fight, and no headless-mode footgun.
  *
- * <p>Files are read in place — never copied or moved — so each chunk's
+ * <p>The actual scan-and-embed logic lives in {@link IngestionService},
+ * shared with the chat-callable {@code ingestDirectory} tool
+ * ({@link spring.ai.tool.IngestionTools}) so "Browse Folder..." and typing
+ * "please ingest ~/Documents/legal" in the chat box behave identically.
+ * Files are read in place — never copied or moved — so each chunk's
  * metadata can carry the file's real absolute path, which {@code /chat/rag}
  * then surfaces back in its citations. {@code GET /documents/file} streams
  * a cited PDF back on demand (also reading it in place) so those citations
@@ -50,10 +48,10 @@ public class DocumentUploadController {
 
     private static final String PDF_EXTENSION = ".pdf";
 
-    private final VectorStore vectorStore;
+    private final IngestionService ingestionService;
 
-    public DocumentUploadController(VectorStore vectorStore) {
-        this.vectorStore = vectorStore;
+    public DocumentUploadController(IngestionService ingestionService) {
+        this.ingestionService = ingestionService;
     }
 
     /**
@@ -198,7 +196,9 @@ public class DocumentUploadController {
     /**
      * Reads every PDF found under {@code request.directory()} straight off
      * disk (recursing into subfolders unless {@code recursive: false} is
-     * given) and adds their chunks to the vector store.
+     * given) and adds their chunks to the vector store, via
+     * {@link IngestionService} — the same logic the {@code ingestDirectory}
+     * chat tool uses.
      */
     @PostMapping("/documents/ingest-directory")
     public ResponseEntity<Map<String, Object>> ingestDirectory(@RequestBody IngestDirectoryRequest request) {
@@ -206,98 +206,28 @@ public class DocumentUploadController {
             return badRequest("A non-blank 'directory' path is required");
         }
 
-        Path directory = Path.of(request.directory()).toAbsolutePath().normalize();
-
-        if (!Files.isDirectory(directory)) {
-            return badRequest("Not a directory: " + directory);
-        }
-
-        List<Path> pdfFiles;
+        IngestionService.IngestResult result;
         try {
-            pdfFiles = findPdfFiles(directory, request.recursiveOrDefault());
+            result = ingestionService.ingestDirectory(request.directory(), request.recursiveOrDefault());
+        } catch (IllegalArgumentException e) {
+            return badRequest(e.getMessage());
         } catch (IOException e) {
             return ResponseEntity
                     .status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Map.of("error", "Failed to scan directory " + directory + ": " + e.getMessage()));
-        }
-
-        if (pdfFiles.isEmpty()) {
-            return badRequest("No PDF files found in: " + directory);
-        }
-
-        TextSplitter textSplitter = new TokenTextSplitter();
-        List<Document> allChunks = new ArrayList<>();
-        List<String> ingested = new ArrayList<>();
-        List<Map<String, String>> failed = new ArrayList<>();
-
-        for (Path pdfFile : pdfFiles) {
-            try {
-                allChunks.addAll(readAndSplit(pdfFile, textSplitter));
-                ingested.add(pdfFile.getFileName().toString());
-            } catch (IOException e) {
-                failed.add(Map.of("file", pdfFile.toString(), "error", String.valueOf(e.getMessage())));
-            }
-        }
-
-        if (!allChunks.isEmpty()) {
-            vectorStore.add(allChunks);
+                    .body(Map.of("error", "Failed to scan directory: " + e.getMessage()));
         }
 
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("message", "Documents ingested from directory");
-        body.put("directory", directory.toString());
-        body.put("filesProcessed", ingested.size());
-        body.put("chunksAdded", allChunks.size());
-        body.put("ingested", ingested);
-        if (!failed.isEmpty()) {
-            body.put("failed", failed);
+        body.put("directory", result.directory());
+        body.put("filesProcessed", result.filesProcessed());
+        body.put("chunksAdded", result.chunksAdded());
+        body.put("ingested", result.ingested());
+        if (!result.failed().isEmpty()) {
+            body.put("failed", result.failed());
         }
 
         return ResponseEntity.ok(body);
-    }
-
-    private List<Path> findPdfFiles(Path directory, boolean recursive) throws IOException {
-        try (Stream<Path> stream = recursive ? Files.walk(directory) : Files.list(directory)) {
-            return stream
-                    .filter(Files::isRegularFile)
-                    .filter(path -> path.getFileName().toString().toLowerCase().endsWith(PDF_EXTENSION))
-                    .sorted()
-                    .toList();
-        }
-    }
-
-    /**
-     * Reads a single PDF directly from disk by path (one {@link Document}
-     * per physical page), stamps it with filename/page/absolute-path
-     * metadata, and splits it into embeddable chunks. The file is read in
-     * place, never copied.
-     */
-    private List<Document> readAndSplit(Path pdfFile, TextSplitter textSplitter) throws IOException {
-        Resource resource = new FileSystemResource(pdfFile);
-
-        PdfDocumentReaderConfig config = PdfDocumentReaderConfig
-                .builder()
-                .withPagesPerDocument(1)
-                .build();
-
-        List<Document> pages = new PagePdfDocumentReader(resource, config).get();
-        stampSourceMetadata(pages, pdfFile.getFileName().toString(), pdfFile.toString());
-
-        return textSplitter.apply(pages);
-    }
-
-    /**
-     * Stamps our own source/page/path metadata explicitly (rather than
-     * relying on whatever keys the reader may or may not set) so citations
-     * are reliable downstream when answering RAG questions.
-     */
-    private void stampSourceMetadata(List<Document> pages, String filename, String absolutePath) {
-        for (int i = 0; i < pages.size(); i++) {
-            Map<String, Object> metadata = pages.get(i).getMetadata();
-            metadata.put(DocumentMetadataKeys.SOURCE, filename);
-            metadata.put(DocumentMetadataKeys.PAGE, i + 1);
-            metadata.put(DocumentMetadataKeys.ABSOLUTE_PATH, absolutePath);
-        }
     }
 
     private ResponseEntity<Map<String, Object>> badRequest(String message) {

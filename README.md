@@ -45,6 +45,9 @@ The app starts on **http://localhost:8080**. The UI is served automatically at t
 ### Chat Response with Sources
 ![Chat Response with Sources](screenshots/2.%20Chat%20response%20with%20sources.png)
 
+### Ingesting PDFs via Chat
+![Ingesting PDFs via Chat](screenshots/3.%20Ingesting%20PDFs%20via%20Chat,%20using%20pdf%20ingestion%20tool.png)
+
 ### pgvector Vector Store
 ![pgvector Vector Store](screenshots/pgvector%20-%20vector%20store.png)
 
@@ -53,6 +56,7 @@ The app starts on **http://localhost:8080**. The UI is served automatically at t
 - **Standard Chat** mode — talks directly to the model (`POST /chat`).
 - **PDF Knowledge Assistant** mode — RAG over your ingested PDFs (`POST /chat/rag`), with a **Sources** list (file, page, and absolute path) shown under each answer. Each citation is a clickable link (backed by `GET /documents/file`) that opens the actual PDF, straight off disk, at the cited page — nothing is copied or uploaded to show it.
 - **Browse Folder…** from the sidebar — opens an in-app folder browser (a modal backed by `GET /documents/browse`, which lists subfolders with plain `java.nio.file` directory listing, no OS dialog involved). Click through folders (or jump to **Home** / **Computer**, or go **Up**) and hit **Ingest This Folder** on whichever one you land on. Every PDF under it (recursively, by default) is then read in place and added to the vector store (`POST /documents/ingest-directory`). Nothing is copied or uploaded: the app reads each file straight from where it already lives, so citations carry the document's real absolute path.
+- Inside **PDF Knowledge Assistant** mode, you can also just ask for it in the chat box — e.g. *"please ingest the PDFs in ~/Documents/legal"*. This is a Spring AI [`@Tool`](https://docs.spring.io/spring-ai/reference/api/tools.html) (`IngestionTools.ingestDirectory`) made available to `/chat/rag` alone (a per-request tool, not a client-wide default), so the model calls it when it recognizes an ingestion request; it shares the exact same `IngestionService` as the folder-browser button and the REST endpoint, so all three paths behave identically. `~` is expanded to your home directory since that's how paths are naturally typed. **Standard Chat** mode never sees this tool. This is an alternative to the button, not a replacement for it.
 - Mode is locked once you send your first message in a chat — start a **New Chat** to switch between Standard Chat and Knowledge Assistant.
 - Stateless: each question is sent independently, no conversation history is kept server-side.
 
@@ -81,3 +85,5 @@ export OPENAI_API_KEY=sk-...
 ```
 
 Postgres connection settings (`spring.datasource.*` and `spring.ai.vectorstore.pgvector.*`) live in `src/main/resources/application.properties` and can be overridden with the usual Spring Boot env vars/flags.
+
+Pinned to Spring AI `1.0.0-M6` (bumped from `1.0.0-M3`) — the minimum milestone with the `@Tool` annotation used by `IngestionTools`, chosen specifically because it still uses the same starter artifact ids this project already depends on and still targets Spring Boot 3.x (later Spring AI lines rename the starters and, at `2.0.x`, require Spring Boot 4). One related API change came with it: `SearchRequest` is now built via `SearchRequest.builder()...build()` rather than the old `SearchRequest.query(...).withTopK(...)` static factory.

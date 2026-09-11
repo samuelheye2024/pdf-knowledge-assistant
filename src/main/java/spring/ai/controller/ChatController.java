@@ -12,6 +12,7 @@ import spring.ai.model.DocumentMetadataKeys;
 import spring.ai.dto.ChatRequest;
 import spring.ai.dto.RagChatResponse;
 import spring.ai.dto.Source;
+import spring.ai.tool.IngestionTools;
 
 import java.util.Comparator;
 import java.util.HashMap;
@@ -31,6 +32,14 @@ import java.util.stream.Collectors;
  *
  * <p>Both endpoints are stateless: each request is answered independently, with
  * no conversation history retained between calls.
+ *
+ * <p>{@link IngestionTools} is only made available to {@code /chat/rag} (via a
+ * per-call {@code .tools(...)}, not a client-wide default), so the model can
+ * call it there — reading and embedding PDFs from a folder, exactly like
+ * {@code POST /documents/ingest-directory} does — whenever a question in PDF
+ * Knowledge Assistant mode reads like "please ingest the PDFs in
+ * ~/Documents/legal". Plain {@code /chat} never sees this tool. This works
+ * alongside the "Browse Folder..." button in the UI rather than replacing it.
  */
 @RestController
 public class ChatController {
@@ -43,6 +52,9 @@ public class ChatController {
             section to provide accurate answers. If unsure or if the answer isn't found in the DOCUMENTS section,
             simply state that you don't know the answer.
 
+            If the user is instead asking you to ingest, load, or index PDFs from a folder or path -- rather than
+            asking a question to be answered from the DOCUMENTS section -- call the ingestDirectory tool to do that.
+
             QUESTION:
             {input}
 
@@ -53,10 +65,13 @@ public class ChatController {
 
     private final ChatClient chatClient;
     private final VectorStore vectorStore;
+    private final IngestionTools ingestionTools;
 
-    public ChatController(ChatClient.Builder chatClientBuilder, VectorStore vectorStore) {
+    public ChatController(ChatClient.Builder chatClientBuilder, VectorStore vectorStore,
+            IngestionTools ingestionTools) {
         this.chatClient = chatClientBuilder.build();
         this.vectorStore = vectorStore;
+        this.ingestionTools = ingestionTools;
     }
 
     @PostMapping("/chat")
@@ -82,6 +97,7 @@ public class ChatController {
 
         String answer = chatClient
                 .prompt(promptTemplate.create(promptParams))
+                .tools(ingestionTools)
                 .call()
                 .content();
 
@@ -89,12 +105,13 @@ public class ChatController {
     }
 
     private List<Document> retrieveSimilarDocuments(String question) {
-        return vectorStore.similaritySearch(SearchRequest.query(question).withTopK(SIMILARITY_TOP_K));
+        return vectorStore.similaritySearch(
+                SearchRequest.builder().query(question).topK(SIMILARITY_TOP_K).build());
     }
 
     private String joinContent(List<Document> documents) {
         return documents.stream()
-                .map(document -> document.getContent().toString())
+                .map(document -> document.getText() == null ? "" : document.getText())
                 .collect(Collectors.joining());
     }
 

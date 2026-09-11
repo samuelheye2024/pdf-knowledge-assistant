@@ -13,7 +13,7 @@ java {
 }
 
 ext {
-    set('springAiVersion', '1.0.0-M3')
+    set('springAiVersion', '1.0.0-M6')
 }
 
 repositories {
