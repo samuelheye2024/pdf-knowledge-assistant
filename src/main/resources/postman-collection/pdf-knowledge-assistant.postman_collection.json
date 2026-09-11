@@ -15,6 +15,11 @@
       "key": "browsePath",
       "value": "",
       "type": "string"
+    },
+    {
+      "key": "filePath",
+      "value": "",
+      "type": "string"
     }
   ],
   "item": [
@@ -145,6 +150,32 @@
           }
         },
         "description": "Scans 'directory' on disk for PDFs and adds them to the vector store, reading each file in place (nothing is copied or uploaded). 'recursive' defaults to true when omitted. Each chunk's metadata records the file's real absolute path, which /chat/rag returns in its 'sources'. The UI normally gets 'directory' from the in-app folder browser ('Browse Directory' above) rather than the user typing it, but this endpoint works standalone too."
+      },
+      "response": []
+    },
+    {
+      "name": "Get Document File",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/documents/file?path={{filePath}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "documents",
+            "file"
+          ],
+          "query": [
+            {
+              "key": "path",
+              "value": "{{filePath}}",
+              "description": "Absolute path to an already-ingested .pdf file, as returned in a /chat/rag source's 'path' field."
+            }
+          ]
+        },
+        "description": "Streams the PDF at 'path' straight off disk (Content-Type: application/pdf, Content-Disposition: inline) so it can be opened directly \u2014 nothing is copied. This is what each clickable citation in the UI links to, with a '#page=N' fragment appended client-side to jump to the cited page. Trusts any existing, readable .pdf path it's given; fine for a personal, localhost-only tool, not something to expose beyond that without adding access checks."
       },
       "response": []
     }

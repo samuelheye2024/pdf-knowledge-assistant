@@ -31,7 +31,7 @@
   };
 
   const state = {
-    mode: "chat",
+    mode: "rag",
     locked: false,
   };
 
@@ -191,6 +191,20 @@
     return { row, content, textSpan };
   }
 
+  // Points a citation at the PDF it was pulled from, read straight off disk
+  // by /documents/file (never copied), jumping to the cited page via the
+  // browser's built-in PDF viewer's #page= fragment (1-based, same as the
+  // page numbers the backend already reports).
+  function buildSourceFileUrl(path, page) {
+    const url = new URL(API_BASE + "/documents/file");
+    url.searchParams.set("path", path);
+    let href = url.toString();
+    if (page != null) {
+      href += `#page=${page}`;
+    }
+    return href;
+  }
+
   function setMessageText(refs, text, isError, sources) {
     refs.textSpan.textContent = text;
     if (isError) {
@@ -209,13 +223,24 @@
       const list = document.createElement("ul");
       sources.forEach((s) => {
         const li = document.createElement("li");
-        li.textContent = s.page != null ? `${s.file} — page ${s.page}` : s.file;
+        const label = s.page != null ? `${s.file} — page ${s.page}` : s.file;
 
         if (s.path) {
+          const link = document.createElement("a");
+          link.className = "source-link";
+          link.textContent = label;
+          link.href = buildSourceFileUrl(s.path, s.page);
+          link.target = "_blank";
+          link.rel = "noopener";
+          link.title = `Open ${s.path}${s.page != null ? ` at page ${s.page}` : ""}`;
+          li.appendChild(link);
+
           const pathEl = document.createElement("span");
           pathEl.className = "source-path";
           pathEl.textContent = s.path;
           li.appendChild(pathEl);
+        } else {
+          li.textContent = label;
         }
 
         list.appendChild(li);

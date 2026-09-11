@@ -17,8 +17,8 @@
       <div class="section">
         <div class="section-label">Mode</div>
         <div class="mode-toggle" id="modeToggle">
-          <button class="mode-option active" data-mode="chat" type="button">Standard Chat</button>
-          <button class="mode-option" data-mode="rag" type="button">PDF Knowledge Assistant</button>
+          <button class="mode-option" data-mode="chat" type="button">Standard Chat</button>
+          <button class="mode-option active" data-mode="rag" type="button">PDF Knowledge Assistant</button>
         </div>
       </div>
 
@@ -44,14 +44,14 @@
 
     <main class="main">
       <header class="main-header">
-        <h1 id="modeTitle">Standard Chat</h1>
-        <p id="modeDesc">Chatting directly with the model — no document context.</p>
+        <h1 id="modeTitle">PDF Knowledge Assistant</h1>
+        <p id="modeDesc">Answers are grounded in the PDFs you've ingested into the vector store, with sources cited below each answer.</p>
       </header>
 
       <div class="messages" id="messages">
         <div class="empty-state" id="emptyState">
-          <h2 id="emptyStateTitle">Standard Chat</h2>
-          <p id="emptyStateText">Ask a question below to get started. Switch to <strong>PDF Knowledge Assistant</strong> mode to ask questions grounded in your uploaded documents.</p>
+          <h2 id="emptyStateTitle">PDF Knowledge Assistant</h2>
+          <p id="emptyStateText">Ask a question below to get started. Answers will be grounded in your ingested PDFs, with sources cited below each answer.</p>
         </div>
       </div>
 

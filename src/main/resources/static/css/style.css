@@ -7,6 +7,8 @@
   --text-secondary: #b4b4bd;
   --accent: #19c37d;
   --accent-hover: #15a86a;
+  --link: #4da3ff;
+  --link-hover: #7cbaff;
   --danger: #ef4444;
   --input-bg: #40414f;
   --border-subtle: #4d4d58;
@@ -381,6 +383,31 @@ body {
 
 .sources li {
   margin-bottom: 2px;
+}
+
+.source-link {
+  color: var(--link);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.source-link::after {
+  content: "\2197";
+  display: inline-block;
+  margin-left: 2px;
+  font-size: 0.85em;
+  opacity: 0.75;
+  text-decoration: none;
+}
+
+.source-link:hover {
+  color: var(--link-hover);
+}
+
+.source-link:hover::after {
+  opacity: 1;
 }
 
 .source-path {

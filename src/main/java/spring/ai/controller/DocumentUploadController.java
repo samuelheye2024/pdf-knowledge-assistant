@@ -8,7 +8,9 @@ import org.springframework.ai.transformer.splitter.TokenTextSplitter;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -39,7 +41,9 @@ import java.util.stream.Stream;
  *
  * <p>Files are read in place — never copied or moved — so each chunk's
  * metadata can carry the file's real absolute path, which {@code /chat/rag}
- * then surfaces back in its citations.
+ * then surfaces back in its citations. {@code GET /documents/file} streams
+ * a cited PDF back on demand (also reading it in place) so those citations
+ * can be opened directly from the UI.
  */
 @RestController
 public class DocumentUploadController {
@@ -114,6 +118,42 @@ public class DocumentUploadController {
         body.put("parent", parent != null ? parent.toString() : null);
         body.put("entries", entries);
         return ResponseEntity.ok(body);
+    }
+
+    /**
+     * Streams a single ingested PDF straight off disk so citations in the UI
+     * can be opened directly, at a given page, without ever copying the file
+     * anywhere. {@code path} must point at an existing, readable {@code .pdf}
+     * file; {@code Content-Disposition: inline} lets the browser's built-in
+     * PDF viewer render it (and honor a {@code #page=N} fragment) instead of
+     * downloading it.
+     *
+     * <p>Note: like {@code /documents/browse}, this endpoint trusts any path
+     * on disk it's given — acceptable for a personal, localhost-only tool,
+     * but it should not be exposed beyond that without adding access checks.
+     */
+    @GetMapping("/documents/file")
+    public ResponseEntity<Resource> serveFile(@RequestParam String path) {
+        if (path == null || path.isBlank()) {
+            return ResponseEntity.badRequest().build();
+        }
+
+        Path file = Path.of(path).toAbsolutePath().normalize();
+
+        if (!Files.isRegularFile(file) || !Files.isReadable(file)) {
+            return ResponseEntity.notFound().build();
+        }
+        if (!file.getFileName().toString().toLowerCase().endsWith(PDF_EXTENSION)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+
+        Resource resource = new FileSystemResource(file);
+
+        return ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_PDF)
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        "inline; filename=\"" + file.getFileName() + "\"")
+                .body(resource);
     }
 
     private List<Map<String, Object>> listSubdirectories(Path directory) throws IOException {
