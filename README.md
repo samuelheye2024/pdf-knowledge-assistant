@@ -45,6 +45,9 @@ The app starts on **http://localhost:8080**. The UI is served automatically at t
 ### Chat Response with Sources
 ![Chat Response with Sources](screenshots/2.%20Chat%20response%20with%20sources.png)
 
+### pgvector Vector Store
+![pgvector Vector Store](screenshots/pgvector%20-%20vector%20store.png)
+
 ## UI features
 
 - **Standard Chat** mode — talks directly to the model (`POST /chat`).
