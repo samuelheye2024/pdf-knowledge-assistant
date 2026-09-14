@@ -39,14 +39,23 @@ The app starts on **http://localhost:8080**. The UI is served automatically at t
 
 ## Screenshots
 
-### PDF Knowledge Assistant
-![PDF Knowledge Assistant](screenshots/1.%20PDF%20Knowledge%20Assistant.png)
-
-### pgvector Vector Store
-![pgvector Vector Store](screenshots/2.%20pgvector%20-%20vector%20store.png)
-
 ### Standard Chat
-![Standard Chat](screenshots/3.%20%20Standard%20Chat.png)
+![Standard Chat](screenshots/1.%20%20Standard%20Chat.png)
+
+### PDF Knowledge Assistant
+![PDF Knowledge Assistant](screenshots/2.%20PDF%20Knowledge%20Assistant.png)
+
+### Vector Store
+![Vector Store](screenshots/3.%20vector_store.png)
+
+### Content
+![Content](screenshots/4.%20Content.png)
+
+### Metadata
+![Metadata](screenshots/5.%20Metadata.png)
+
+### Embeddings
+![Embeddings](screenshots/6.%20Embeddings.png)
 
 ## UI features
 
