@@ -2,7 +2,7 @@ package spring.ai.model;
 
 /**
  * Metadata keys used on {@link org.springframework.ai.document.Document}
- * instances as they flow from ingestion ({@code DocumentUploadController})
+ * instances as they flow from ingestion ({@code DocumentIngestionController})
  * through to RAG citation extraction ({@code ChatController}).
  *
  * <p>Centralizing these keys avoids the two controllers silently drifting

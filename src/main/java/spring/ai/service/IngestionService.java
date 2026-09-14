@@ -27,7 +27,7 @@ import java.util.Map;
  * The server does the fetching itself over HTTP, so this works identically
  * no matter which machine the request came from.
  *
- * <p>{@code POST /documents/ingest-url} ({@link spring.ai.controller.DocumentUploadController})
+ * <p>{@code POST /documents/ingest-url} ({@link spring.ai.controller.DocumentIngestionController})
  * and the chat-callable {@code ingestUrl} tool ({@link spring.ai.tool.IngestionTools})
  * both call {@link #ingestUrl}, so they can never drift apart.
  */

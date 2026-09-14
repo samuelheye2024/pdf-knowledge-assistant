@@ -21,11 +21,11 @@ import java.util.Map;
  * behave identically.
  */
 @RestController
-public class DocumentUploadController {
+public class DocumentIngestionController {
 
     private final IngestionService ingestionService;
 
-    public DocumentUploadController(IngestionService ingestionService) {
+    public DocumentIngestionController(IngestionService ingestionService) {
         this.ingestionService = ingestionService;
     }
 
